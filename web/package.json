@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "preview": "opennextjs-cloudflare build && node --env-file-if-exists=../.env node_modules/@opennextjs/cloudflare/dist/cli/index.js preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "deploy": "opennextjs-cloudflare build && node --env-file-if-exists=../.env node_modules/@opennextjs/cloudflare/dist/cli/index.js deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "typecheck": "tsc --noEmit"
   },
