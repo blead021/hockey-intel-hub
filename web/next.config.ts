@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import type { NextConfig } from "next";
 
 // Secrets live in one .env file at the repo root, shared with the Python pipeline.
@@ -13,7 +14,9 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
 };
 
-export default nextConfig;
-
-// Makes Cloudflare bindings (Hyperdrive, R2) available during `next dev`.
-initOpenNextCloudflareForDev();
+export default async function config(phase: string): Promise<NextConfig> {
+  // Makes Cloudflare bindings (Hyperdrive, R2) available during `next dev` only.
+  // Builds and CI have no local database string, which the Hyperdrive stand-in requires.
+  if (phase === PHASE_DEVELOPMENT_SERVER) await initOpenNextCloudflareForDev();
+  return nextConfig;
+}

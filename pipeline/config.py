@@ -20,4 +20,11 @@ def require(name: str) -> str:
 
 def database_url() -> str:
     """Direct (unpooled) connection, used by migrations and batch jobs."""
-    return os.environ.get("DATABASE_URL_UNPOOLED") or require("DATABASE_URL")
+    name = "DATABASE_URL_UNPOOLED" if os.environ.get("DATABASE_URL_UNPOOLED") else "DATABASE_URL"
+    url = require(name).strip()
+    # Check the shape here, because the driver's own parse errors echo the password.
+    if not url.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError(
+            f"{name} must start with postgresql://. Copy the whole value after the = sign in .env."
+        )
+    return url
