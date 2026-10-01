@@ -1,0 +1,39 @@
+{
+  "name": "hockey-intel-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "preview": "opennextjs-cloudflare build && node --env-file-if-exists=../.env node_modules/@opennextjs/cloudflare/dist/cli/index.js preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.7",
+    "next": "16.3.8",
+    "postgres": "^3.4.9",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wrangler": "^4.146.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.4": true,
+    "esbuild@0.28.1": true,
+    "unrs-resolver@1.12.2": true,
+    "workerd@1.20261001.1": true
+  }
+}

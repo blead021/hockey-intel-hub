@@ -1,0 +1,26 @@
+# Scheduled pipeline jobs. Phase 0 runs only the heartbeat; ingestion jobs are added in later phases.
+name: Pipeline daily
+
+on:
+  schedule:
+    - cron: "0 10 * * *" # 10:00 UTC, after the last West Coast games are final
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-daily
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m pipeline.heartbeat
+        env:
+          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}

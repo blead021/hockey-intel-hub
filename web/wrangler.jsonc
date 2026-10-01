@@ -1,0 +1,27 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "hockey-intel-hub",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-09-30",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"observability": { "enabled": true },
+	// Hyperdrive pools connections from Workers to Neon.
+	// HYPERDRIVE_ID_PLACEHOLDER is replaced after `wrangler hyperdrive create`.
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "HYPERDRIVE_ID_PLACEHOLDER"
+		}
+	],
+	// Raw JSON archive from every API pull, so metrics can be recomputed.
+	"r2_buckets": [
+		{
+			"binding": "RAW_ARCHIVE",
+			"bucket_name": "hockey-intel-raw"
+		}
+	]
+}

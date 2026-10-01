@@ -1,0 +1,22 @@
+[project]
+name = "hockey-intel-pipeline"
+version = "0.1.0"
+description = "Data ingestion, metrics, models, and sentiment jobs for Hockey Intel Hub"
+requires-python = ">=3.12"
+dependencies = [
+  "psycopg[binary]>=3.2",   # Postgres driver
+  "python-dotenv>=1.0",     # reads the root .env file during local runs
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
+
+[tool.pytest.ini_options]
+testpaths = ["pipeline/tests"]

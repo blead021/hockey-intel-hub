@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Design tokens from CLAUDE.md section 7. Positive and negative differ in
+   lightness as well as hue, so they stay distinguishable without color. */
+:root {
+  --bg: #f4f3ef;
+  --surface: #ffffff;
+  --ink: #16181d;
+  --muted: #4f5561;
+  --border: #dcdad3;
+  --border-soft: #eceae4;
+  --positive: #1d5aa6;
+  --positive-soft: #e4ecf7;
+  --negative: #b4501a;
+  --negative-soft: #fbebdd;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+  --font-heading: var(--nf-heading);
+  --font-sans: var(--nf-body);
+  --font-mono: var(--nf-numbers);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--nf-body), system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--nf-heading), system-ui, sans-serif;
+}
