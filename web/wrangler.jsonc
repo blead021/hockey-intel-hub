@@ -10,11 +10,11 @@
 	},
 	"observability": { "enabled": true },
 	// Hyperdrive pools connections from Workers to Neon.
-	// HYPERDRIVE_ID_PLACEHOLDER is replaced after `wrangler hyperdrive create`.
+	// Config "hockey-intel-neon", created with `wrangler hyperdrive create`.
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
-			"id": "HYPERDRIVE_ID_PLACEHOLDER"
+			"id": "bb40bb7af01e46a8861323252be3f169"
 		}
 	],
 	// Raw JSON archive from every API pull, so metrics can be recomputed.
