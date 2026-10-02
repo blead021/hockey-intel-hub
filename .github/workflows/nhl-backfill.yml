@@ -1,0 +1,48 @@
+# Loads every finished game of a season. Run by hand from the Actions tab.
+# "all" loads the three past seasons one after another (GitHub keeps only one queued run, so
+# starting seasons separately would cancel all but the last).
+# Safe to rerun: games already loaded are skipped unless "reload" is checked.
+name: NHL backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season to load"
+        required: true
+        type: choice
+        options: ["all", "20232024", "20242025", "20252026", "20262027"]
+      reload:
+        description: "Reload games already loaded"
+        type: boolean
+        default: false
+
+concurrency:
+  group: nhl-load
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      ARCHIVE_REQUIRED: "1"
+      R2_BUCKET_RAW: hockey-intel-raw
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - name: Load
+        run: |
+          seasons="${{ inputs.season }}"
+          [ "$seasons" = "all" ] && seasons="20232024 20242025 20252026"
+          for season in $seasons; do
+            python -m pipeline.ingest.nightly --season "$season" ${{ inputs.reload && '--reload' || '' }}
+          done

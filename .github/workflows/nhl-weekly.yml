@@ -1,9 +1,9 @@
-# Daily pipeline: last night's games, rosters, then a health check.
-name: Pipeline daily
+# Weekly: NHL EDGE skating and shot tracking for every skater who has played this season.
+name: NHL weekly
 
 on:
   schedule:
-    - cron: "0 10 * * *" # 10:00 UTC, after the last West Coast games are final
+    - cron: "30 11 * * 1" # Mondays 11:30 UTC, after the daily load
   workflow_dispatch:
 
 concurrency:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  daily:
+  edge:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -28,8 +28,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - name: Load last night's games and current rosters
-        run: python -m pipeline.ingest.nightly
-      - name: Heartbeat
-        if: always()
-        run: python -m pipeline.heartbeat
+      - run: python -m pipeline.ingest.nhl_edge
