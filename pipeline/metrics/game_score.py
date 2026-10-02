@@ -17,7 +17,9 @@ Built from the same kinds of pieces as public goals-above-average game scores, a
   Goaltending   (goalies) xG against - goals against
 
 - The 0.2 splits what happens on the ice equally among the five skaters.
-- League rates are per season, computed from all skaters, so an average player scores about 0.
+- League rates are per season and per position group (forwards, defensemen), so an average player at
+  his position scores about 0. Defensemen get fewer primary assists per minute than forwards; comparing
+  them with all skaters would penalize them for their position.
 - Every xG figure uses the season adjustment (xg_season_factor), so xG and goals are on one scale.
 - 0.19 goals per penalty was measured from our data: power-play goals minus shorthanded goals, per
   penalty, was 0.183 to 0.195 in 2022-23 through 2025-26.
@@ -102,23 +104,37 @@ def skater_components(g: SkaterGame, r: Rates, factor: float) -> Components:
     return c
 
 
-def season_rates(conn, season: int, factor: float) -> Rates:
-    ev, pp, sh = conn.execute(
-        """select sum(o.xgf)::float8 / nullif(sum(o.toi_5v5_sec), 0),
-                  sum(o.pp_xgf - o.pp_xga)::float8 / nullif(sum(s.pp_toi_sec) filter (where o.pp_xgf is not null), 0),
-                  sum(o.sh_xgf - o.sh_xga)::float8 / nullif(sum(s.pk_toi_sec) filter (where o.sh_xgf is not null), 0)
-           from player_game_onice o
-           join game_skater_stats s on s.player_id = o.player_id and s.game_id = o.game_id
-           join games g on g.id = o.game_id
-           where g.season_id = %s and g.game_type = 2 and o.xgf is not null""",
+GROUP_SQL = "case when s.position = 'D' then 'D' else 'F' end"
+
+
+def season_rates(conn, season: int, factor: float) -> dict[str, Rates]:
+    """League rates per position group ('F' or 'D') for one season."""
+    onice = {
+        grp: (ev, pp, sh)
+        for grp, ev, pp, sh in conn.execute(
+            f"""select {GROUP_SQL},
+                      sum(o.xgf)::float8 / nullif(sum(o.toi_5v5_sec), 0),
+                      sum(o.pp_xgf - o.pp_xga)::float8 / nullif(sum(s.pp_toi_sec) filter (where o.pp_xgf is not null), 0),
+                      sum(o.sh_xgf - o.sh_xga)::float8 / nullif(sum(s.pk_toi_sec) filter (where o.sh_xgf is not null), 0)
+               from player_game_onice o
+               join game_skater_stats s on s.player_id = o.player_id and s.game_id = o.game_id
+               join games g on g.id = o.game_id
+               where g.season_id = %s and g.game_type = 2 and o.xgf is not null
+               group by 1""",
+            (season,),
+        )
+    }
+    assists = dict(conn.execute(
+        f"""select {GROUP_SQL}, sum(s.a1)::float8 / nullif(sum(s.toi_sec), 0) from game_skater_stats s
+            join games g on g.id = s.game_id where g.season_id = %s and g.game_type = 2 group by 1""",
         (season,),
-    ).fetchone()
-    a1 = conn.execute(
-        """select sum(s.a1)::float8 / nullif(sum(s.toi_sec), 0) from game_skater_stats s join games g on g.id = s.game_id
-           where g.season_id = %s and g.game_type = 2""",
-        (season,),
-    ).fetchone()[0]
-    return Rates(ev_xgf=(ev or 0) * factor, pp_net=(pp or 0) * factor, sh_net=(sh or 0) * factor, a1=a1 or 0)
+    ).fetchall())
+    rates = {}
+    for grp in ("F", "D"):
+        ev, pp, sh = onice.get(grp, (0, 0, 0))
+        rates[grp] = Rates(ev_xgf=(ev or 0) * factor, pp_net=(pp or 0) * factor, sh_net=(sh or 0) * factor,
+                           a1=assists.get(grp) or 0)
+    return rates
 
 
 def compute_season(conn, season: int, counts) -> None:
@@ -126,7 +142,7 @@ def compute_season(conn, season: int, counts) -> None:
     factor = factor[0] if factor else 1.0
     rates = season_rates(conn, season, factor)
     rows = conn.execute(
-        """select s.player_id, s.game_id, s.team_id, coalesce(o.toi_5v5_sec, 0), o.xgf::float8, o.xga::float8,
+        f"""select s.player_id, s.game_id, s.team_id, {GROUP_SQL}, coalesce(o.toi_5v5_sec, 0), o.xgf::float8, o.xga::float8,
                   coalesce(s.pp_toi_sec, 0), o.pp_xgf::float8, o.pp_xga::float8,
                   coalesce(s.pk_toi_sec, 0), o.sh_xgf::float8, o.sh_xga::float8, s.toi_sec,
                   coalesce(sh.goals, 0), coalesce(sh.ixg, 0)::float8, s.a1, s.penalties_drawn, s.penalties_taken,
@@ -140,8 +156,8 @@ def compute_season(conn, season: int, counts) -> None:
     ).fetchall()
     out = []
     for row in rows:
-        player_id, game_id, team_id, *values = row
-        c = skater_components(SkaterGame(*values), rates, factor)
+        player_id, game_id, team_id, group, *values = row
+        c = skater_components(SkaterGame(*values), rates[group], factor)
         out.append((player_id, game_id, team_id, False, c))
 
     for player_id, game_id, team_id, xga, ga in conn.execute(
