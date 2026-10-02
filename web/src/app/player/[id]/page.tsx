@@ -25,7 +25,7 @@ function parseId(value: string): number | null {
 export async function generateMetadata({ params }: PageProps<"/player/[id]">) {
   const id = parseId((await params).id);
   const player = id ? await withDb((sql) => getPlayer(sql, id)) : undefined;
-  return { title: player ? `${player.first_name} ${player.last_name} | Hockey Intel Hub` : "Player | Hockey Intel Hub" };
+  return { title: player ? `${player.first_name} ${player.last_name}` : "Player" };
 }
 
 export default async function PlayerPage({ params }: PageProps<"/player/[id]">) {

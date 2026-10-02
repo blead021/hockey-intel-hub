@@ -18,7 +18,7 @@ import { currentSeason, parseSeason } from "@/lib/seasons";
 
 export async function generateMetadata({ params }: PageProps<"/team/[abbrev]">) {
   const { abbrev } = await params;
-  return { title: `${abbrev.toUpperCase()} roster | Hockey Intel Hub` };
+  return { title: `${abbrev.toUpperCase()} roster` };
 }
 
 export default async function TeamPage({ params, searchParams }: PageProps<"/team/[abbrev]">) {

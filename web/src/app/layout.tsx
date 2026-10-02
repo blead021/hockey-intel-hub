@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { SiteHeader } from "@/components/ui";
+import { SITE_NAME } from "@/lib/site";
 import "./globals.css";
 
 const heading = Barlow_Condensed({
@@ -22,7 +23,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hockey Intel Hub",
+  title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
   description: "Front office tools for hockey fans: stats, analytics, sentiment, trade chatter, and contracts.",
 };
 

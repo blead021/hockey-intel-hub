@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-USER_AGENT = "HockeyIntelHub/0.1 (+https://hockey-intel-hub.hockey-intel-web.workers.dev)"
+USER_AGENT = "Puckwise/0.1 (+https://hockey-intel-hub.hockey-intel-web.workers.dev)"
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 MAX_WAIT_SECONDS = 60
 

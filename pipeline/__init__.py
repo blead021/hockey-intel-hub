@@ -1,1 +1,1 @@
-"""Hockey Intel Hub data pipeline."""
+"""Puckwise data pipeline."""

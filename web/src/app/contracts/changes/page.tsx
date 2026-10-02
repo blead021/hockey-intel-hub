@@ -5,7 +5,7 @@ import { withDb } from "@/lib/db";
 import { money, season } from "@/lib/format";
 import { getContractEvents, getTeams } from "@/lib/queries";
 
-export const metadata = { title: "Contract changes | Hockey Intel Hub" };
+export const metadata = { title: "Contract changes" };
 
 const OUTCOMES: Record<string, string> = {
   applied: "Updated",

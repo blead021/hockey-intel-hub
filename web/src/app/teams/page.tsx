@@ -4,7 +4,7 @@ import { PageTitle } from "@/components/ui";
 import { withDb } from "@/lib/db";
 import { getTeams } from "@/lib/queries";
 
-export const metadata = { title: "Teams | Hockey Intel Hub" };
+export const metadata = { title: "Teams" };
 
 export default async function TeamsPage() {
   await connection();

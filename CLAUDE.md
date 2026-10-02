@@ -1,4 +1,6 @@
-# Hockey Intel Hub
+# Puckwise
+
+Product name: **Puckwise** (renamed from Hockey Intel Hub on 2026-10-02). Infrastructure names (GitHub repo, Cloudflare Worker, Neon project, R2 bucket, Hyperdrive config, local folder) still use hockey-intel until they are renamed.
 
 A subscription web app that gives hockey fans "front office tools": player stats, advanced analytics, fan and beat-writer sentiment, trade chatter, contracts, and age, organized into connected screens: League, My Team / Team Roster, Player Profile, Trade Targets, Trade Builder, and a Rumor Tracker.
 
