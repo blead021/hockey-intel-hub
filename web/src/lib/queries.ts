@@ -345,3 +345,84 @@ export async function getContractEvents(sql: Sql, days = 30) {
     where e.created_at > now() - make_interval(days => ${days})
     group by e.id order by e.created_at desc, e.id desc`;
 }
+
+export type AdvancedMetric = { key: string; value: number | null; pctile: number | null };
+export type SkaterAdvanced = { season_id: number; gp: number; toi_5v5_sec: number; ranked: boolean; metrics: AdvancedMetric[] };
+
+// 5v5 on-ice results for one season, with percentiles among skaters at the same position
+// (forwards or defense) who played at least 100 minutes at 5v5. Lower is better for CA/60.
+export async function getSkaterAdvanced(sql: Sql, playerId: number, season: number): Promise<SkaterAdvanced | undefined> {
+  const rows = await sql<
+    {
+      season_id: number; gp: number; toi_5v5_sec: number; ranked: boolean;
+      cf_pct: number | null; rel_cf_pct: number | null; ff_pct: number | null; gf_pct: number | null;
+      pdo: number | null; ozs_pct: number | null; cf60: number | null; ca60: number | null;
+      p_cf_pct: number | null; p_rel_cf_pct: number | null; p_ff_pct: number | null; p_gf_pct: number | null;
+      p_pdo: number | null; p_ozs_pct: number | null; p_cf60: number | null; p_ca60: number | null;
+    }[]
+  >`
+    with totals as (
+      select o.player_id, o.season_id,
+             case when p.position = 'D' then 'D' else 'F' end as grp,
+             sum(gp)::int as gp, sum(toi_5v5_sec)::int as toi, sum(cf)::float8 as cf, sum(ca)::float8 as ca,
+             sum(ff)::float8 as ff, sum(fa)::float8 as fa, sum(sf)::float8 as sf, sum(sa)::float8 as sa,
+             sum(gf)::float8 as gf, sum(ga)::float8 as ga, sum(oz_starts)::float8 as oz, sum(dz_starts)::float8 as dz,
+             sum(off_cf)::float8 as off_cf, sum(off_ca)::float8 as off_ca
+      from skater_season_onice o join players p on p.id = o.player_id
+      where o.season_id = ${season} and o.game_type = 2
+      group by o.player_id, o.season_id, grp),
+    metrics as (
+      select player_id, season_id, grp, gp, toi, toi >= 6000 as ranked,
+             cf / nullif(cf + ca, 0) as cf_pct,
+             cf / nullif(cf + ca, 0) - off_cf / nullif(off_cf + off_ca, 0) as rel_cf_pct,
+             ff / nullif(ff + fa, 0) as ff_pct,
+             gf / nullif(gf + ga, 0) as gf_pct,
+             (gf / nullif(sf, 0) + 1 - ga / nullif(sa, 0)) * 100 as pdo,
+             oz / nullif(oz + dz, 0) as ozs_pct,
+             cf * 3600 / nullif(toi, 0) as cf60,
+             ca * 3600 / nullif(toi, 0) as ca60
+      from totals),
+    ranked as (
+      select m.*,
+        case when ranked then percent_rank() over (partition by grp, ranked order by cf_pct nulls first) end as p_cf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by rel_cf_pct nulls first) end as p_rel_cf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by ff_pct nulls first) end as p_ff_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by gf_pct nulls first) end as p_gf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by pdo nulls first) end as p_pdo,
+        case when ranked then percent_rank() over (partition by grp, ranked order by ozs_pct nulls first) end as p_ozs_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by cf60 nulls first) end as p_cf60,
+        case when ranked then percent_rank() over (partition by grp, ranked order by ca60 desc nulls first) end as p_ca60
+      from metrics m)
+    select season_id, gp, toi as toi_5v5_sec, ranked, cf_pct, rel_cf_pct, ff_pct, gf_pct, pdo, ozs_pct, cf60, ca60,
+           p_cf_pct, p_rel_cf_pct, p_ff_pct, p_gf_pct, p_pdo, p_ozs_pct, p_cf60, p_ca60
+    from ranked where player_id = ${playerId}`;
+  const r = rows[0];
+  if (!r) return undefined;
+  const m = (key: string, value: number | null, pctile: number | null) => ({ key, value, pctile });
+  return {
+    season_id: r.season_id,
+    gp: r.gp,
+    toi_5v5_sec: r.toi_5v5_sec,
+    ranked: r.ranked,
+    metrics: [
+      m("CF%", r.cf_pct, r.p_cf_pct),
+      m("Relative CF%", r.rel_cf_pct, r.p_rel_cf_pct),
+      m("FF%", r.ff_pct, r.p_ff_pct),
+      m("GF%", r.gf_pct, r.p_gf_pct),
+      m("CF/60", r.cf60, r.p_cf60),
+      m("CA/60", r.ca60, r.p_ca60),
+      m("PDO", r.pdo, r.p_pdo),
+      m("OZS%", r.ozs_pct, r.p_ozs_pct),
+    ],
+  };
+}
+
+// The season to show advanced metrics for: the most recent one with at least 100 minutes at 5v5
+// (early in a season that is usually last season), or else the most recent one with any data.
+export async function getLatestOniceSeason(sql: Sql, playerId: number): Promise<number | undefined> {
+  const [row] = await sql<{ season_id: number | null }[]>`
+    select coalesce(max(season_id) filter (where toi >= 6000), max(season_id)) as season_id
+    from (select g.season_id, sum(o.toi_5v5_sec) as toi from player_game_onice o join games g on g.id = o.game_id
+          where o.player_id = ${playerId} and g.game_type = 2 group by g.season_id) s`;
+  return row?.season_id ?? undefined;
+}

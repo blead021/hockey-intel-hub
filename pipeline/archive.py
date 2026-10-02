@@ -52,6 +52,22 @@ def put(key: str, payload) -> str | None:
     return key
 
 
+def get(key: str):
+    """Reads back a file written by put(). Raises KeyError when it does not exist."""
+    if not configured():
+        raise ArchiveUnavailable("R2 credentials are not set, so archived files cannot be read")
+    s3 = _s3()
+    try:
+        body = s3.get_object(Bucket=os.environ["R2_BUCKET_RAW"], Key=key)["Body"].read()
+    except s3.exceptions.NoSuchKey:
+        raise KeyError(key) from None
+    try:
+        body = gzip.decompress(body)
+    except OSError:
+        pass  # some clients decompress automatically because of ContentEncoding
+    return json.loads(body)
+
+
 @cache
 def _s3():
     import boto3

@@ -10,6 +10,7 @@ Safe to rerun: games are replaced, never duplicated. The job fails if more than 
 """
 
 import argparse
+from collections import Counter
 from datetime import date
 
 from pipeline.db import connect
@@ -34,6 +35,7 @@ class TooManyFailures(RuntimeError):
 
 def main(argv: list[str] | None = None) -> None:
     from pipeline.ingest import nhl_games, nhl_players, nhl_teams
+    from pipeline.metrics import onice
 
     parser = argparse.ArgumentParser(description="Load NHL games, stats, and rosters")
     parser.add_argument("--season", type=int, help="backfill one season (e.g. 20232024)")
@@ -69,6 +71,16 @@ def main(argv: list[str] | None = None) -> None:
         ).fetchone()
         if first:
             nhl_games.load_time_on_ice(conn, http, first, last, counts)
+
+        # 5v5 on-ice results from the play-by-play and shift files just stored in R2.
+        onice_games = conn.execute(
+            """select id, season_id from games where season_id = %s and stats_loaded_at is not null
+               and (onice_loaded_at is null or onice_loaded_at < stats_loaded_at) order by game_date, id""",
+            (season,),
+        ).fetchall()
+        onice_counts = Counter()
+        onice.run(conn, onice_games, onice_counts)
+        counts.update({f"onice_{k}": v for k, v in onice_counts.items()})
 
         if not backfill:
             nhl_players.refresh_rosters(conn, http, counts)

@@ -7,6 +7,8 @@ import { faceoffPct, heightFt, money, num, pct, season as seasonLabel, shortDate
 import {
   getCurrentContract,
   getEnabledSources,
+  getLatestOniceSeason,
+  getSkaterAdvanced,
   getGoalieSeasons,
   getLatestEdge,
   getPlayer,
@@ -14,6 +16,7 @@ import {
   getSkaterSeasons,
   type Edge,
   type GoalieSeason,
+  type SkaterAdvanced,
   type SkaterSeason,
 } from "@/lib/queries";
 import { currentSeason } from "@/lib/seasons";
@@ -38,18 +41,20 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
     const player = await getPlayer(sql, id);
     if (!player) return null;
     const isGoalie = player.position === "G";
-    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources] = await Promise.all([
+    const oniceSeason = isGoalie ? undefined : await getLatestOniceSeason(sql, id);
+    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced] = await Promise.all([
       isGoalie ? Promise.resolve([]) : getSkaterSeasons(sql, id),
       isGoalie ? getGoalieSeasons(sql, id) : Promise.resolve([]),
       isGoalie ? Promise.resolve([]) : getSkaterLastGames(sql, id),
       getCurrentContract(sql, id, season),
       isGoalie ? Promise.resolve(undefined) : getLatestEdge(sql, id),
       getEnabledSources(sql),
+      oniceSeason ? getSkaterAdvanced(sql, id, oniceSeason) : Promise.resolve(undefined),
     ]);
-    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources };
+    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced };
   });
   if (!data) notFound();
-  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources } = data;
+  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced } = data;
 
   const bio = [
     player.position,
@@ -188,12 +193,14 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
             </DataTable>
           )}
 
+          <AdvancedSection advanced={advanced} position={player.position} />
+
           {sources.has("nhl_edge") && <EdgeSection edge={edge} />}
         </>
       )}
 
-      <SectionTitle>Advanced metrics and sentiment</SectionTitle>
-      <Unavailable>On-ice metrics, WAR, surplus value, and fan and media sentiment are added in later phases.</Unavailable>
+      <SectionTitle>More coming</SectionTitle>
+      <Unavailable>Expected goals, WAR, surplus value, and fan and media sentiment are added in later phases.</Unavailable>
     </main>
   );
 }
@@ -314,4 +321,71 @@ function EdgeSection({ edge }: { edge: Edge | undefined }) {
 
 function pctile(value: number | null): string | undefined {
   return value == null ? undefined : `${Math.round(value * 100)}th percentile`;
+}
+
+// Context stats describe a player's deployment or luck, not quality, so their bars are neutral.
+const CONTEXT_METRICS = new Set(["PDO", "OZS%"]);
+
+function formatMetric(key: string, value: number | null): string {
+  if (value == null) return "—";
+  if (key === "PDO") return num(value, 1);
+  if (key.endsWith("/60")) return num(value, 1);
+  if (key === "Relative CF%") return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}`;
+  return pct(value);
+}
+
+function AdvancedSection({ advanced, position }: { advanced: SkaterAdvanced | undefined; position: string | null }) {
+  const group = position === "D" ? "defensemen" : "forwards";
+  return (
+    <>
+      <SectionTitle
+        note={
+          advanced
+            ? `5v5, ${seasonLabel(advanced.season_id)} · ${Math.round(advanced.toi_5v5_sec / 60).toLocaleString("en-US")} min in ${advanced.gp} GP · percentile vs. ${group}`
+            : undefined
+        }
+      >
+        Advanced metrics
+      </SectionTitle>
+      {!advanced ? (
+        <Unavailable>No 5v5 on-ice data yet.</Unavailable>
+      ) : (
+        <div className="rounded-lg border border-border bg-surface p-4">
+          {!advanced.ranked && (
+            <p className="mb-3 text-sm text-muted">Percentiles appear after 100 minutes at 5v5.</p>
+          )}
+          <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+            {advanced.metrics.map((m) => (
+              <div key={m.key} className="grid grid-cols-[7.5rem_4.5rem_1fr] items-center gap-3">
+                <dt className="text-sm text-muted">{m.key}</dt>
+                <dd className="text-right font-mono">{formatMetric(m.key, m.value)}</dd>
+                <dd>
+                  <PercentileBar value={m.pctile} neutral={CONTEXT_METRICS.has(m.key)} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-4 text-xs text-muted">
+            CF% is the share of 5v5 shot attempts taken by his team while he was on the ice; relative CF% compares it with
+            his team when he was off the ice. A shot blocked by a teammate counts as an attempt by the shooter&apos;s team.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PercentileBar({ value, neutral }: { value: number | null; neutral: boolean }) {
+  if (value == null) return <span className="text-xs text-muted">—</span>;
+  const rank = Math.round(value * 100);
+  // Colors back up the number, which is always shown, so meaning never depends on color alone.
+  const fill = neutral ? "bg-muted" : rank >= 50 ? "bg-positive" : "bg-negative";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-border-soft" aria-hidden>
+        <div className={`h-full ${fill}`} style={{ width: `${Math.max(rank, 2)}%` }} />
+      </div>
+      <span className="w-8 text-right font-mono text-xs text-muted">{rank}</span>
+    </div>
+  );
 }
