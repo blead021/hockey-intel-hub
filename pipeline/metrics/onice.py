@@ -320,10 +320,12 @@ def run(conn, games: list[tuple[int, int]], counts) -> None:
                 rows = shot_rows(pbp) if model else []
                 xg_by_event = xg_score.score(model, rows) if model else {}
                 result = compute_game(pbp, shifts, xg_by_event)
-                if not result.players:
-                    counts["games_without_shifts"] += 1
-                    continue
                 shooters, goalies = shooting_and_goalies(rows, xg_by_event)
+                if not result.players:
+                    # No shift chart (the NHL is missing some): on-ice stats are impossible, but individual
+                    # shooting and goalie xG do not need shifts, so keep those.
+                    counts["games_without_shifts"] += 1
+                    result = GameResult()
                 store(conn, game_id, result, shooters, goalies, xg_version)
                 counts["games_computed"] += 1
                 counts["shots_without_shooter"] += result.shots_without_shooter

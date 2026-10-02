@@ -256,7 +256,7 @@ function GoalieSections({ seasons, current }: { seasons: GoalieSeason[]; current
             <StatCard label="SV%" value={svPct(s.saves, s.shots_against)} />
             <StatCard label="GAA" value={s.toi_sec ? num((s.ga * 3600) / s.toi_sec, 2) : "—"} />
             <StatCard label="Shots against" value={s.shots_against} />
-            <StatCard label="GSAx" value="—" detail="needs expected goals" />
+            <StatCard label="GSAx" value={s.gsax == null ? "—" : signed(Math.round(s.gsax * 10) / 10)} detail="goals saved above expected" />
           </CardGrid>
         </>
       )}
@@ -275,6 +275,7 @@ function GoalieSections({ seasons, current }: { seasons: GoalieSeason[]; current
               <Th>SV%</Th>
               <Th>GAA</Th>
               <Th>SA</Th>
+              <Th>GSAx</Th>
             </tr>
           </thead>
           <tbody>
@@ -288,6 +289,7 @@ function GoalieSections({ seasons, current }: { seasons: GoalieSeason[]; current
                 <Td>{svPct(g.saves, g.shots_against)}</Td>
                 <Td>{g.toi_sec ? num((g.ga * 3600) / g.toi_sec, 2) : "—"}</Td>
                 <Td>{g.shots_against}</Td>
+                <Td>{g.gsax == null ? "—" : signed(Math.round(g.gsax * 10) / 10)}</Td>
               </tr>
             ))}
           </tbody>
@@ -329,8 +331,10 @@ const CONTEXT_METRICS = new Set(["PDO", "OZS%"]);
 function formatMetric(key: string, value: number | null): string {
   if (value == null) return "—";
   if (key === "PDO") return num(value, 1);
+  if (key === "ixG/60") return num(value, 2);
   if (key.endsWith("/60")) return num(value, 1);
-  if (key === "Relative CF%") return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}`;
+  if (key === "Goals above expected") return `${value > 0 ? "+" : ""}${value.toFixed(1)}`;
+  if (key.startsWith("Relative")) return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}`;
   return pct(value);
 }
 
@@ -366,8 +370,10 @@ function AdvancedSection({ advanced, position }: { advanced: SkaterAdvanced | un
             ))}
           </dl>
           <p className="mt-4 text-xs text-muted">
-            CF% is the share of 5v5 shot attempts taken by his team while he was on the ice; relative CF% compares it with
-            his team when he was off the ice. A shot blocked by a teammate counts as an attempt by the shooter&apos;s team.
+            xGF% is his team&apos;s share of 5v5 expected goals while he was on the ice, from our own expected goals model;
+            HDCF% counts only high-danger chances (xG of 0.15 or more). CF% is the share of shot attempts; relative
+            stats compare him with his team when he was off the ice. Goals above expected and ixG/60 use his own shots
+            at all strengths. A shot blocked by a teammate counts as an attempt by the shooter&apos;s team.
           </p>
         </div>
       )}

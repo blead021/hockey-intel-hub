@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { CardGrid, DataTable, PageTitle, SeasonPicker, SectionTitle, StatCard, Td, Th, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
-import { faceoffPct, money, num, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
+import { faceoffPct, money, num, pct, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
 import {
   getCapCeiling,
   getEnabledSources,
@@ -12,6 +12,7 @@ import {
   getRosterSkaters,
   getTeam,
   getTeamRecord,
+  getTeamXgfPct,
   type RosterSkater,
 } from "@/lib/queries";
 import { currentSeason, parseSeason } from "@/lib/seasons";
@@ -33,17 +34,18 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     const seasons = await getLoadedSeasons(sql);
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [record, skaters, goalies, sources, ceiling] = await Promise.all([
+    const [record, skaters, goalies, sources, ceiling, xgfPct] = await Promise.all([
       getTeamRecord(sql, team.id, season),
       getRosterSkaters(sql, team.id, season, isCurrent),
       getRosterGoalies(sql, team.id, season, isCurrent),
       getEnabledSources(sql),
       getCapCeiling(sql, season),
+      getTeamXgfPct(sql, team.id, season),
     ]);
-    return { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling };
+    return { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling, xgfPct };
   });
   if (!data) notFound();
-  const { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling } = data;
+  const { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling, xgfPct } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -72,7 +74,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
             />
           </>
         )}
-        <StatCard label="5v5 xGF%" value="—" detail="advanced metrics come later" />
+        <StatCard label="5v5 xGF%" value={pct(xgfPct)} detail="share of expected goals at 5v5" />
       </CardGrid>
 
       <SkaterTable title="Forwards" rows={forwards} showContracts={showContracts} showFaceoffs />
@@ -93,6 +95,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
               <Th>SV%</Th>
               <Th>GAA</Th>
               <Th>SA</Th>
+              <Th>GSAx</Th>
               {showContracts && <Th>Cap hit</Th>}
               {showContracts && <Th>Expiry</Th>}
             </tr>
@@ -110,6 +113,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
                 <Td>{svPct(g.saves, g.shots_against)}</Td>
                 <Td>{g.toi_sec ? num((g.ga * 3600) / g.toi_sec, 2) : "—"}</Td>
                 <Td>{g.shots_against}</Td>
+                <Td>{g.gsax == null ? "—" : signed(Math.round(g.gsax * 10) / 10)}</Td>
                 {showContracts && <Td>{money(g.cap_hit)}</Td>}
                 {showContracts && <Td>{expiry(g.end_season, g.expiry_status)}</Td>}
               </tr>
@@ -169,6 +173,7 @@ function SkaterTable({
               <Th>SOG</Th>
               <Th>TOI/GP</Th>
               <Th>PP TOI/GP</Th>
+              <Th>5v5 xGF%</Th>
               {showFaceoffs && <Th>FO%</Th>}
               {showContracts && <Th>Cap hit</Th>}
               {showContracts && <Th>Expiry</Th>}
@@ -191,6 +196,7 @@ function SkaterTable({
                 <Td>{p.sog}</Td>
                 <Td>{p.gp ? toi(p.toi_sec / p.gp) : "—"}</Td>
                 <Td>{p.gp && p.pp_toi_sec != null ? toi(p.pp_toi_sec / p.gp) : "—"}</Td>
+                <Td>{pct(p.xgf_pct)}</Td>
                 {showFaceoffs && <Td>{p.position === "C" ? faceoffPct(p.fow, p.fol) : "—"}</Td>}
                 {showContracts && <Td>{money(p.cap_hit)}</Td>}
                 {showContracts && <Td>{expiry(p.end_season, p.expiry_status)}</Td>}

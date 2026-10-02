@@ -49,6 +49,13 @@ export async function getTeamRecord(sql: Sql, teamId: number, season: number): P
   return row;
 }
 
+export async function getTeamXgfPct(sql: Sql, teamId: number, season: number): Promise<number | null> {
+  const [row] = await sql<{ xgf_pct: number | null }[]>`
+    select xgf::float8 / nullif(xgf + xga, 0)::float8 as xgf_pct from team_season_onice
+    where team_id = ${teamId} and season_id = ${season} and game_type = 2`;
+  return row?.xgf_pct ?? null;
+}
+
 export type RosterSkater = {
   id: number;
   name: string;
@@ -66,6 +73,7 @@ export type RosterSkater = {
   pp_toi_sec: number | null;
   fow: number;
   fol: number;
+  xgf_pct: number | null;
   cap_hit: number | null;
   end_season: number | null;
   expiry_status: string | null;
@@ -83,6 +91,10 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
       from skater_season_stats
       where team_id = ${teamId} and season_id = ${season} and game_type = 2
       group by player_id),
+    onice as (
+      select player_id, sum(xgf)::float8 / nullif(sum(xgf + xga), 0)::float8 as xgf_pct
+      from skater_season_onice where team_id = ${teamId} and season_id = ${season} and game_type = 2
+      group by player_id),
     members as (
       select id as player_id from players where ${isCurrent} and current_team_id = ${teamId} and position <> 'G'
       union
@@ -92,10 +104,12 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
            coalesce(s.gp, 0) as gp, coalesce(s.g, 0) as g, coalesce(s.a, 0) as a, coalesce(s.pts, 0) as pts,
            coalesce(s.plus_minus, 0) as plus_minus, coalesce(s.pim, 0) as pim, coalesce(s.sog, 0) as sog,
            coalesce(s.toi_sec, 0) as toi_sec, s.pp_toi_sec, coalesce(s.fow, 0) as fow, coalesce(s.fol, 0) as fol,
+           oi.xgf_pct,
            c.cap_hit, c.end_season, c.expiry_status, c.clause
     from members m
     join players p on p.id = m.player_id
     left join stats s on s.player_id = p.id
+    left join onice oi on oi.player_id = p.id
     left join lateral (
       select cap_hit, end_season, expiry_status, clause from contracts
       where player_id = p.id and status = 'active' and ${season} between start_season and end_season
@@ -117,6 +131,7 @@ export type RosterGoalie = {
   saves: number;
   ga: number;
   toi_sec: number;
+  gsax: number | null;
   cap_hit: number | null;
   end_season: number | null;
   expiry_status: string | null;
@@ -132,6 +147,12 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
       from goalie_season_stats
       where team_id = ${teamId} and season_id = ${season} and game_type = 2
       group by player_id),
+    gx as (
+      -- Goals saved above expected, with the season adjustment.
+      select x.player_id, sum(x.xga)::float8 * coalesce(max(f.factor), 1)::float8 - sum(x.goals_against)::float8 as gsax
+      from goalie_season_xg x left join xg_season_factor f on f.season_id = x.season_id
+      where x.team_id = ${teamId} and x.season_id = ${season} and x.game_type = 2
+      group by x.player_id),
     members as (
       select id as player_id from players where ${isCurrent} and current_team_id = ${teamId} and position = 'G'
       union
@@ -141,10 +162,12 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
            coalesce(s.gp, 0) as gp, coalesce(s.gs, 0) as gs, coalesce(s.w, 0) as w, coalesce(s.l, 0) as l,
            coalesce(s.otl, 0) as otl, coalesce(s.shots_against, 0) as shots_against,
            coalesce(s.saves, 0) as saves, coalesce(s.ga, 0) as ga, coalesce(s.toi_sec, 0) as toi_sec,
+           gx.gsax,
            c.cap_hit, c.end_season, c.expiry_status, c.clause
     from members m
     join players p on p.id = m.player_id
     left join stats s on s.player_id = p.id
+    left join gx on gx.player_id = p.id
     left join lateral (
       select cap_hit, end_season, expiry_status, clause from contracts
       where player_id = p.id and status = 'active' and ${season} between start_season and end_season
@@ -230,13 +253,17 @@ export type GoalieSeason = {
   saves: number;
   ga: number;
   toi_sec: number;
+  gsax: number | null;
 };
 
 export async function getGoalieSeasons(sql: Sql, playerId: number) {
   return sql<GoalieSeason[]>`
     select s.season_id, string_agg(distinct t.abbrev, ', ') as teams, sum(gp)::int as gp, sum(gs)::int as gs,
            sum(w)::int as w, sum(l)::int as l, sum(otl)::int as otl, sum(shots_against)::int as shots_against,
-           sum(saves)::int as saves, sum(ga)::int as ga, sum(toi_sec)::int as toi_sec
+           sum(saves)::int as saves, sum(ga)::int as ga, sum(toi_sec)::int as toi_sec,
+           (select sum(x.xga)::float8 * coalesce(max(f.factor), 1)::float8 - sum(x.goals_against)::float8
+              from goalie_season_xg x left join xg_season_factor f on f.season_id = x.season_id
+              where x.player_id = ${playerId} and x.season_id = s.season_id and x.game_type = 2) as gsax
     from goalie_season_stats s join teams t on t.id = s.team_id
     where s.player_id = ${playerId} and s.game_type = 2
     group by s.season_id order by s.season_id desc`;
@@ -357,8 +384,12 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
       season_id: number; gp: number; toi_5v5_sec: number; ranked: boolean;
       cf_pct: number | null; rel_cf_pct: number | null; ff_pct: number | null; gf_pct: number | null;
       pdo: number | null; ozs_pct: number | null; cf60: number | null; ca60: number | null;
+      xgf_pct: number | null; rel_xgf_pct: number | null; hdcf_pct: number | null;
+      ixg: number | null; gax: number | null; ixg60: number | null;
       p_cf_pct: number | null; p_rel_cf_pct: number | null; p_ff_pct: number | null; p_gf_pct: number | null;
       p_pdo: number | null; p_ozs_pct: number | null; p_cf60: number | null; p_ca60: number | null;
+      p_xgf_pct: number | null; p_rel_xgf_pct: number | null; p_hdcf_pct: number | null;
+      p_gax: number | null; p_ixg60: number | null;
     }[]
   >`
     with totals as (
@@ -367,10 +398,18 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
              sum(gp)::int as gp, sum(toi_5v5_sec)::int as toi, sum(cf)::float8 as cf, sum(ca)::float8 as ca,
              sum(ff)::float8 as ff, sum(fa)::float8 as fa, sum(sf)::float8 as sf, sum(sa)::float8 as sa,
              sum(gf)::float8 as gf, sum(ga)::float8 as ga, sum(oz_starts)::float8 as oz, sum(dz_starts)::float8 as dz,
-             sum(off_cf)::float8 as off_cf, sum(off_ca)::float8 as off_ca
+             sum(off_cf)::float8 as off_cf, sum(off_ca)::float8 as off_ca,
+             sum(xgf)::float8 as xgf, sum(xga)::float8 as xga, sum(hdcf)::float8 as hdcf, sum(hdca)::float8 as hdca,
+             sum(off_xgf)::float8 as off_xgf, sum(off_xga)::float8 as off_xga
       from skater_season_onice o join players p on p.id = o.player_id
       where o.season_id = ${season} and o.game_type = 2
       group by o.player_id, o.season_id, grp),
+    shooting as (
+      -- All strengths. Expected goals use the season adjustment (league xG scaled to league goals).
+      select s.player_id, sum(s.goals)::float8 as goals, sum(s.ixg)::float8 * coalesce(max(f.factor), 1)::float8 as ixg
+      from skater_season_shooting s left join xg_season_factor f on f.season_id = s.season_id
+      where s.season_id = ${season} and s.game_type = 2
+      group by s.player_id),
     metrics as (
       select player_id, season_id, grp, gp, toi, toi >= 6000 as ranked,
              cf / nullif(cf + ca, 0) as cf_pct,
@@ -380,8 +419,14 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
              (gf / nullif(sf, 0) + 1 - ga / nullif(sa, 0)) * 100 as pdo,
              oz / nullif(oz + dz, 0) as ozs_pct,
              cf * 3600 / nullif(toi, 0) as cf60,
-             ca * 3600 / nullif(toi, 0) as ca60
-      from totals),
+             ca * 3600 / nullif(toi, 0) as ca60,
+             xgf / nullif(xgf + xga, 0) as xgf_pct,
+             xgf / nullif(xgf + xga, 0) - off_xgf / nullif(off_xgf + off_xga, 0) as rel_xgf_pct,
+             hdcf / nullif(hdcf + hdca, 0) as hdcf_pct,
+             sh.ixg as ixg,
+             sh.goals - sh.ixg as gax,
+             sh.ixg * 3600 / nullif(toi, 0) as ixg60
+      from totals left join shooting sh using (player_id)),
     ranked as (
       select m.*,
         case when ranked then percent_rank() over (partition by grp, ranked order by cf_pct nulls first) end as p_cf_pct,
@@ -391,10 +436,17 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
         case when ranked then percent_rank() over (partition by grp, ranked order by pdo nulls first) end as p_pdo,
         case when ranked then percent_rank() over (partition by grp, ranked order by ozs_pct nulls first) end as p_ozs_pct,
         case when ranked then percent_rank() over (partition by grp, ranked order by cf60 nulls first) end as p_cf60,
-        case when ranked then percent_rank() over (partition by grp, ranked order by ca60 desc nulls first) end as p_ca60
+        case when ranked then percent_rank() over (partition by grp, ranked order by ca60 desc nulls first) end as p_ca60,
+        case when ranked then percent_rank() over (partition by grp, ranked order by xgf_pct nulls first) end as p_xgf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by rel_xgf_pct nulls first) end as p_rel_xgf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by hdcf_pct nulls first) end as p_hdcf_pct,
+        case when ranked then percent_rank() over (partition by grp, ranked order by gax nulls first) end as p_gax,
+        case when ranked then percent_rank() over (partition by grp, ranked order by ixg60 nulls first) end as p_ixg60
       from metrics m)
     select season_id, gp, toi as toi_5v5_sec, ranked, cf_pct, rel_cf_pct, ff_pct, gf_pct, pdo, ozs_pct, cf60, ca60,
-           p_cf_pct, p_rel_cf_pct, p_ff_pct, p_gf_pct, p_pdo, p_ozs_pct, p_cf60, p_ca60
+           xgf_pct, rel_xgf_pct, hdcf_pct, ixg, gax, ixg60,
+           p_cf_pct, p_rel_cf_pct, p_ff_pct, p_gf_pct, p_pdo, p_ozs_pct, p_cf60, p_ca60,
+           p_xgf_pct, p_rel_xgf_pct, p_hdcf_pct, p_gax, p_ixg60
     from ranked where player_id = ${playerId}`;
   const r = rows[0];
   if (!r) return undefined;
@@ -405,12 +457,17 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
     toi_5v5_sec: r.toi_5v5_sec,
     ranked: r.ranked,
     metrics: [
+      m("xGF%", r.xgf_pct, r.p_xgf_pct),
+      m("Relative xGF%", r.rel_xgf_pct, r.p_rel_xgf_pct),
+      m("HDCF%", r.hdcf_pct, r.p_hdcf_pct),
       m("CF%", r.cf_pct, r.p_cf_pct),
       m("Relative CF%", r.rel_cf_pct, r.p_rel_cf_pct),
       m("FF%", r.ff_pct, r.p_ff_pct),
       m("GF%", r.gf_pct, r.p_gf_pct),
       m("CF/60", r.cf60, r.p_cf60),
       m("CA/60", r.ca60, r.p_ca60),
+      m("ixG/60", r.ixg60, r.p_ixg60),
+      m("Goals above expected", r.gax, r.p_gax),
       m("PDO", r.pdo, r.p_pdo),
       m("OZS%", r.ozs_pct, r.p_ozs_pct),
     ],
