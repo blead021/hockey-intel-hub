@@ -1,0 +1,32 @@
+# Weekly: Claude writes each skater's play style profile (archetype, summary, tags, strengths, watch-outs).
+# Monday submits a Message Batch after the EDGE load; Tuesday collects the results. Run it by hand any time.
+name: Play style weekly
+
+on:
+  schedule:
+    - cron: "30 12 * * 1,2" # Mondays and Tuesdays 12:30 UTC
+  workflow_dispatch:
+    inputs:
+      max:
+        description: "Most players to submit (leave blank for all)"
+        required: false
+
+concurrency:
+  group: play-style
+  cancel-in-progress: false
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m pipeline.models.play_style ${{ inputs.max && format('--max {0}', inputs.max) || '' }}

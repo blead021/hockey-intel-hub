@@ -553,8 +553,8 @@ export type PlayStyle = {
   writeup: { archetype: string | null; summary: string | null; tags: string[]; strengths: string[]; watch_outs: string[] } | null;
 };
 
-// Play style traits (CLAUDE.md section 6): percentiles versus the same position group (centers,
-// wingers, defensemen) among players with 100+ minutes in the season. Zone entries is an estimate.
+// Play style traits (CLAUDE.md section 6), from the player_style_traits view: percentiles versus the same
+// position group among players with 100+ minutes in the season. Zone entries is an estimate.
 export async function getPlayStyle(sql: Sql, playerId: number, season: number): Promise<PlayStyle | undefined> {
   const rows = await sql<
     {
@@ -564,62 +564,11 @@ export async function getPlayStyle(sql: Sql, playerId: number, season: number): 
       slot: number; mid: number; perimeter: number;
     }[]
   >`
-    with base as (
-      select s.player_id,
-             case when p.position = 'D' then 'D' when p.position = 'C' then 'C' else 'W' end as grp,
-             sum(s.toi_sec)::float8 as toi, count(*)::int as gp,
-             sum(s.a1)::float8 as a1, sum(s.hits + s.blocks)::float8 as physical,
-             sum(s.takeaways - s.giveaways)::float8 as puck
-      from game_skater_stats s join games g on g.id = s.game_id join players p on p.id = s.player_id
-      where g.season_id = ${season} and g.game_type = 2
-      group by s.player_id, grp
-      having sum(s.toi_sec) >= 6000),
-    shots as (
-      select sh.player_id, sum(sh.shots)::float8 as shots from player_game_shooting sh join games g on g.id = sh.game_id
-      where g.season_id = ${season} and g.game_type = 2 group by sh.player_id),
-    style as (
-      select st.player_id, sum(st.oz_hits + st.oz_takeaways)::float8 as forecheck, sum(st.rush_onice_5v5)::float8 as rush,
-             sum(st.shots_slot)::int as slot, sum(st.shots_mid)::int as mid, sum(st.shots_perimeter)::int as perimeter
-      from player_game_style st join games g on g.id = st.game_id
-      where g.season_id = ${season} and g.game_type = 2 group by st.player_id),
-    onice as (
-      select o.player_id, sum(o.toi_5v5_sec)::float8 as toi5, sum(o.xga)::float8 as xga,
-             sum(t.toi_5v5_sec - o.toi_5v5_sec)::float8 as off_toi5, sum(t.xga - o.xga)::float8 as off_xga
-      from player_game_onice o join team_game_onice t on t.team_id = o.team_id and t.game_id = o.game_id
-      join games g on g.id = o.game_id
-      where g.season_id = ${season} and g.game_type = 2 and o.xga is not null group by o.player_id),
-    edge as (
-      select player_id, top_speed_pctile::float8 as top_pct, bursts_20plus::float8 / nullif(games_played, 0) as bursts_pg
-      from edge_player_stats where season_id = ${season}),
-    rates as (
-      select b.player_id, b.grp,
-             coalesce(sh.shots, 0) * 3600 / b.toi as shooting,
-             b.a1 * 3600 / b.toi as playmaking,
-             st.rush * 3600 / nullif(oi.toi5, 0) as entries,
-             st.forecheck * 3600 / b.toi as forecheck,
-             b.physical * 3600 / b.toi as physical,
-             oi.xga * 3600 / nullif(oi.toi5, 0) - oi.off_xga * 3600 / nullif(oi.off_toi5, 0) as rel_xga60,
-             b.puck * 3600 / b.toi as puck,
-             e.top_pct, e.bursts_pg,
-             coalesce(st.slot, 0) as slot, coalesce(st.mid, 0) as mid, coalesce(st.perimeter, 0) as perimeter
-      from base b left join shots sh using (player_id) left join style st using (player_id)
-      left join onice oi using (player_id) left join edge e using (player_id)),
-    ranked as (
-      select r.*,
-        percent_rank() over (partition by grp order by shooting) as p_shooting,
-        percent_rank() over (partition by grp order by playmaking) as p_playmaking,
-        case when entries is not null then percent_rank() over (partition by grp, entries is null order by entries) end as p_entries,
-        case when forecheck is not null then percent_rank() over (partition by grp, forecheck is null order by forecheck) end as p_forecheck,
-        percent_rank() over (partition by grp order by physical) as p_physical,
-        case when rel_xga60 is not null then percent_rank() over (partition by grp, rel_xga60 is null order by rel_xga60 desc) end as p_defense,
-        percent_rank() over (partition by grp order by puck) as p_puck,
-        case when bursts_pg is not null then
-          (top_pct + percent_rank() over (partition by grp, bursts_pg is null order by bursts_pg)) / 2 end as p_speed
-      from rates r)
     select k.player_id, p.first_name || ' ' || p.last_name as name, t.abbrev as team, k.grp,
            p_shooting, p_playmaking, p_entries, p_forecheck, p_physical, p_defense, p_puck, p_speed,
            slot, mid, perimeter
-    from ranked k join players p on p.id = k.player_id left join teams t on t.id = p.current_team_id`;
+    from player_style_traits k join players p on p.id = k.player_id left join teams t on t.id = p.current_team_id
+    where k.season_id = ${season}`;
 
   const me = rows.find((r) => r.player_id === playerId);
   if (!me) return undefined;

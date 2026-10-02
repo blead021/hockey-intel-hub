@@ -218,6 +218,7 @@ Season to date, percentiles versus the same position group (centers, wingers, de
 - Shot location split: share of his unblocked shots from the slot (within 25 feet of the net and within 20 feet of the middle), mid-range (within 45 feet, outside the slot), and perimeter (everything farther out).
 - Similar style: the 2 players at the same position whose trait percentile vectors are closest (Euclidean distance), current season.
 - Archetype label, scouting summary, style tags, strengths, and watch-outs: written by Claude from the trait percentiles and season stats only (stored per player, refreshed weekly). The summary describes the numbers in plain English and never invents facts not in them.
+- Implemented 2026-10-02: traits come from the `player_style_traits` view (shared by the site and the job). `python -m pipeline.models.play_style` (workflow `play-style-weekly.yml`, Mondays submit, Tuesdays collect) sends one Message Batch on `claude-haiku-4-5` and stores results in `player_play_style`, for the season the profile page shows. Behind the `play_style_writing` switch (on). Cost about $1 per weekly run, $2-4 per month.
 
 ### Best fits
 Teams graded Need or Thin in the player's strength category, with cap space >= cap hit x 0.5 (the 50% retention limit), excluding his current team, sorted by need severity then cap space.
