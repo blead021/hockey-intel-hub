@@ -1,0 +1,100 @@
+kind,value,team,audience,label,active,notes
+subreddit,hockey,,fan,r/hockey,yes,League-wide subreddit
+subreddit,AnaheimDucks,ANA,fan,r/AnaheimDucks,yes,
+subreddit,BostonBruins,BOS,fan,r/BostonBruins,yes,
+subreddit,sabres,BUF,fan,r/sabres,yes,
+subreddit,canes,CAR,fan,r/canes,yes,
+subreddit,BlueJackets,CBJ,fan,r/BlueJackets,yes,
+subreddit,CalgaryFlames,CGY,fan,r/CalgaryFlames,yes,
+subreddit,hawks,CHI,fan,r/hawks,yes,
+subreddit,ColoradoAvalanche,COL,fan,r/ColoradoAvalanche,yes,
+subreddit,DallasStars,DAL,fan,r/DallasStars,yes,
+subreddit,DetroitRedWings,DET,fan,r/DetroitRedWings,yes,
+subreddit,EdmontonOilers,EDM,fan,r/EdmontonOilers,yes,
+subreddit,FloridaPanthers,FLA,fan,r/FloridaPanthers,yes,
+subreddit,losangeleskings,LAK,fan,r/losangeleskings,yes,
+subreddit,wildhockey,MIN,fan,r/wildhockey,yes,
+subreddit,Habs,MTL,fan,r/Habs,yes,
+subreddit,devils,NJD,fan,r/devils,yes,
+subreddit,Predators,NSH,fan,r/Predators,yes,
+subreddit,NewYorkIslanders,NYI,fan,r/NewYorkIslanders,yes,
+subreddit,rangers,NYR,fan,r/rangers,yes,
+subreddit,OttawaSenators,OTT,fan,r/OttawaSenators,yes,
+subreddit,Flyers,PHI,fan,r/Flyers,yes,
+subreddit,penguins,PIT,fan,r/penguins,yes,
+subreddit,SeattleKraken,SEA,fan,r/SeattleKraken,yes,
+subreddit,SanJoseSharks,SJS,fan,r/SanJoseSharks,yes,
+subreddit,stlouisblues,STL,fan,r/stlouisblues,yes,
+subreddit,TampaBayLightning,TBL,fan,r/TampaBayLightning,yes,
+subreddit,leafs,TOR,fan,r/leafs,yes,
+subreddit,UtahMammoth,UTA,fan,r/UtahMammoth,yes,Name not yet verified; check once Reddit keys exist
+subreddit,canucks,VAN,fan,r/canucks,yes,
+subreddit,goldenknights,VGK,fan,r/goldenknights,yes,
+subreddit,winnipegjets,WPG,fan,r/winnipegjets,yes,
+subreddit,caps,WSH,fan,r/caps,yes,
+google_news,NHL trade,,media,Google News: NHL trade,yes,League-wide trade news
+google_news,"""Anaheim Ducks""",ANA,media,Google News: Anaheim Ducks,yes,
+google_news,"""Boston Bruins""",BOS,media,Google News: Boston Bruins,yes,
+google_news,"""Buffalo Sabres""",BUF,media,Google News: Buffalo Sabres,yes,
+google_news,"""Carolina Hurricanes""",CAR,media,Google News: Carolina Hurricanes,yes,
+google_news,"""Columbus Blue Jackets""",CBJ,media,Google News: Columbus Blue Jackets,yes,
+google_news,"""Calgary Flames""",CGY,media,Google News: Calgary Flames,yes,
+google_news,"""Chicago Blackhawks""",CHI,media,Google News: Chicago Blackhawks,yes,
+google_news,"""Colorado Avalanche""",COL,media,Google News: Colorado Avalanche,yes,
+google_news,"""Dallas Stars""",DAL,media,Google News: Dallas Stars,yes,
+google_news,"""Detroit Red Wings""",DET,media,Google News: Detroit Red Wings,yes,
+google_news,"""Edmonton Oilers""",EDM,media,Google News: Edmonton Oilers,yes,
+google_news,"""Florida Panthers""",FLA,media,Google News: Florida Panthers,yes,
+google_news,"""Los Angeles Kings""",LAK,media,Google News: Los Angeles Kings,yes,
+google_news,"""Minnesota Wild""",MIN,media,Google News: Minnesota Wild,yes,
+google_news,"""Montréal Canadiens""",MTL,media,Google News: Montréal Canadiens,yes,
+google_news,"""New Jersey Devils""",NJD,media,Google News: New Jersey Devils,yes,
+google_news,"""Nashville Predators""",NSH,media,Google News: Nashville Predators,yes,
+google_news,"""New York Islanders""",NYI,media,Google News: New York Islanders,yes,
+google_news,"""New York Rangers""",NYR,media,Google News: New York Rangers,yes,
+google_news,"""Ottawa Senators""",OTT,media,Google News: Ottawa Senators,yes,
+google_news,"""Philadelphia Flyers""",PHI,media,Google News: Philadelphia Flyers,yes,
+google_news,"""Pittsburgh Penguins""",PIT,media,Google News: Pittsburgh Penguins,yes,
+google_news,"""Seattle Kraken""",SEA,media,Google News: Seattle Kraken,yes,
+google_news,"""San Jose Sharks""",SJS,media,Google News: San Jose Sharks,yes,
+google_news,"""St. Louis Blues""",STL,media,Google News: St. Louis Blues,yes,
+google_news,"""Tampa Bay Lightning""",TBL,media,Google News: Tampa Bay Lightning,yes,
+google_news,"""Toronto Maple Leafs""",TOR,media,Google News: Toronto Maple Leafs,yes,
+google_news,"""Utah Mammoth""",UTA,media,Google News: Utah Mammoth,yes,
+google_news,"""Vancouver Canucks""",VAN,media,Google News: Vancouver Canucks,yes,
+google_news,"""Vegas Golden Knights""",VGK,media,Google News: Vegas Golden Knights,yes,
+google_news,"""Winnipeg Jets""",WPG,media,Google News: Winnipeg Jets,yes,
+google_news,"""Washington Capitals""",WSH,media,Google News: Washington Capitals,yes,
+bluesky_search,NHL trade,,fan,Bluesky search: NHL trade,yes,Needs Bluesky app password
+bluesky_search,"""Anaheim Ducks""",ANA,fan,Bluesky search: Anaheim Ducks,yes,Needs Bluesky app password
+bluesky_search,"""Boston Bruins""",BOS,fan,Bluesky search: Boston Bruins,yes,Needs Bluesky app password
+bluesky_search,"""Buffalo Sabres""",BUF,fan,Bluesky search: Buffalo Sabres,yes,Needs Bluesky app password
+bluesky_search,"""Carolina Hurricanes""",CAR,fan,Bluesky search: Carolina Hurricanes,yes,Needs Bluesky app password
+bluesky_search,"""Columbus Blue Jackets""",CBJ,fan,Bluesky search: Columbus Blue Jackets,yes,Needs Bluesky app password
+bluesky_search,"""Calgary Flames""",CGY,fan,Bluesky search: Calgary Flames,yes,Needs Bluesky app password
+bluesky_search,"""Chicago Blackhawks""",CHI,fan,Bluesky search: Chicago Blackhawks,yes,Needs Bluesky app password
+bluesky_search,"""Colorado Avalanche""",COL,fan,Bluesky search: Colorado Avalanche,yes,Needs Bluesky app password
+bluesky_search,"""Dallas Stars""",DAL,fan,Bluesky search: Dallas Stars,yes,Needs Bluesky app password
+bluesky_search,"""Detroit Red Wings""",DET,fan,Bluesky search: Detroit Red Wings,yes,Needs Bluesky app password
+bluesky_search,"""Edmonton Oilers""",EDM,fan,Bluesky search: Edmonton Oilers,yes,Needs Bluesky app password
+bluesky_search,"""Florida Panthers""",FLA,fan,Bluesky search: Florida Panthers,yes,Needs Bluesky app password
+bluesky_search,"""Los Angeles Kings""",LAK,fan,Bluesky search: Los Angeles Kings,yes,Needs Bluesky app password
+bluesky_search,"""Minnesota Wild""",MIN,fan,Bluesky search: Minnesota Wild,yes,Needs Bluesky app password
+bluesky_search,"""Montréal Canadiens""",MTL,fan,Bluesky search: Montréal Canadiens,yes,Needs Bluesky app password
+bluesky_search,"""New Jersey Devils""",NJD,fan,Bluesky search: New Jersey Devils,yes,Needs Bluesky app password
+bluesky_search,"""Nashville Predators""",NSH,fan,Bluesky search: Nashville Predators,yes,Needs Bluesky app password
+bluesky_search,"""New York Islanders""",NYI,fan,Bluesky search: New York Islanders,yes,Needs Bluesky app password
+bluesky_search,"""New York Rangers""",NYR,fan,Bluesky search: New York Rangers,yes,Needs Bluesky app password
+bluesky_search,"""Ottawa Senators""",OTT,fan,Bluesky search: Ottawa Senators,yes,Needs Bluesky app password
+bluesky_search,"""Philadelphia Flyers""",PHI,fan,Bluesky search: Philadelphia Flyers,yes,Needs Bluesky app password
+bluesky_search,"""Pittsburgh Penguins""",PIT,fan,Bluesky search: Pittsburgh Penguins,yes,Needs Bluesky app password
+bluesky_search,"""Seattle Kraken""",SEA,fan,Bluesky search: Seattle Kraken,yes,Needs Bluesky app password
+bluesky_search,"""San Jose Sharks""",SJS,fan,Bluesky search: San Jose Sharks,yes,Needs Bluesky app password
+bluesky_search,"""St. Louis Blues""",STL,fan,Bluesky search: St. Louis Blues,yes,Needs Bluesky app password
+bluesky_search,"""Tampa Bay Lightning""",TBL,fan,Bluesky search: Tampa Bay Lightning,yes,Needs Bluesky app password
+bluesky_search,"""Toronto Maple Leafs""",TOR,fan,Bluesky search: Toronto Maple Leafs,yes,Needs Bluesky app password
+bluesky_search,"""Utah Mammoth""",UTA,fan,Bluesky search: Utah Mammoth,yes,Needs Bluesky app password
+bluesky_search,"""Vancouver Canucks""",VAN,fan,Bluesky search: Vancouver Canucks,yes,Needs Bluesky app password
+bluesky_search,"""Vegas Golden Knights""",VGK,fan,Bluesky search: Vegas Golden Knights,yes,Needs Bluesky app password
+bluesky_search,"""Winnipeg Jets""",WPG,fan,Bluesky search: Winnipeg Jets,yes,Needs Bluesky app password
+bluesky_search,"""Washington Capitals""",WSH,fan,Bluesky search: Washington Capitals,yes,Needs Bluesky app password

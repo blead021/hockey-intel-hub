@@ -73,6 +73,34 @@ Never edit a migration that has already been applied. Add a new file with the ne
 for example `db/0002_mentions.sql`. The runner refuses to continue if an applied file changes.
 On GitHub, pushing a change under `db/` to `main` applies it automatically.
 
+## Sentiment collection
+
+Collectors for news, Bluesky, Reddit, and YouTube run every 3 hours on GitHub Actions
+(`.github/workflows/collect-sentiment.yml`). Each run saves the full raw response to R2, then adds
+new items to the `mentions` table. Scoring comes later (Phase 4).
+
+| Task | Command |
+|---|---|
+| Collect everything now | `python -m pipeline.sentiment.collect` |
+| Collect one source | `python -m pipeline.sentiment.collect --source news_rss` (or `bluesky`, `reddit`, `youtube`) |
+| Load an edited feed list | `python -m pipeline.sentiment.feeds` |
+| Refresh the 32 teams | `python -m pipeline.ingest.nhl_teams` |
+
+**What gets watched** is in `pipeline/sentiment/feeds.csv`. Open it in Excel, add or remove rows,
+save as CSV, and push. Each run loads the file first. Columns:
+
+| Column | Meaning |
+|---|---|
+| kind | `subreddit`, `bluesky_account`, `bluesky_search`, `rss`, `google_news`, or `youtube_channel` |
+| value | Subreddit name, Bluesky handle, search words, feed URL, or YouTube handle (like `@canucks`) |
+| team | Team code like `VAN`, or blank for league-wide |
+| audience | `fan`, `beat_writer`, or `media` |
+| label, notes | For people; not used by the code |
+| active | `yes` or `no` |
+
+A collector without its keys skips itself and says so in `job_runs`. A feed that keeps failing
+shows its error in `collector_state.last_error`.
+
 ## Data source switches
 
 Every external source has a row in the `data_sources` table. To switch one off:
@@ -89,4 +117,6 @@ Before launch, set `commercial_use_confirmed = true` only for sources whose term
 Secrets live in `.env` locally, in GitHub Actions secrets for scheduled jobs, and in Cloudflare
 secrets for the web app. `.env.example` lists every name. Never commit real values.
 
-GitHub Actions secrets needed so far: `DATABASE_URL_UNPOOLED`.
+GitHub Actions secrets: `DATABASE_URL_UNPOOLED`, `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`,
+`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, `YOUTUBE_API_KEY`.

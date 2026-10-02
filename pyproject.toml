@@ -6,6 +6,9 @@ requires-python = ">=3.12"
 dependencies = [
   "psycopg[binary]>=3.2",   # Postgres driver
   "python-dotenv>=1.0",     # reads the root .env file during local runs
+  "httpx>=0.27",            # HTTP client for all API calls
+  "feedparser>=6.0",        # reads RSS and Atom news feeds
+  "boto3>=1.34",            # writes raw archives to Cloudflare R2 (S3-compatible)
 ]
 
 [project.optional-dependencies]

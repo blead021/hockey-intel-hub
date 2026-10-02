@@ -1,4 +1,4 @@
-# Scheduled pipeline jobs. Phase 0 runs only the heartbeat; ingestion jobs are added in later phases.
+# Daily pipeline jobs. Ingestion of games and stats is added in Phase 2.
 name: Pipeline daily
 
 on:
@@ -11,9 +11,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  heartbeat:
+  daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      R2_BUCKET_RAW: hockey-intel-raw
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -21,6 +27,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m pipeline.heartbeat
-        env:
-          DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      - name: Refresh teams
+        run: python -m pipeline.ingest.nhl_teams
+      - name: Heartbeat
+        run: python -m pipeline.heartbeat

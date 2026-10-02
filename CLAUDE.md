@@ -18,8 +18,8 @@ Owner: Brian Leadbetter. Brian is not a full-time developer. Explain decisions i
 |---|---|---|
 | Front end | Next.js (App Router, TypeScript) | Deployed to Cloudflare Workers via the OpenNext Cloudflare adapter |
 | Database | Neon Postgres | Reached from Workers through Cloudflare Hyperdrive; Python jobs connect directly |
-| Heavy data jobs | Python 3.12 on GitHub Actions cron | NHL ingestion, metrics, xG, sentiment scoring, team grades |
-| Light scheduled jobs | Cloudflare Workers Cron Triggers | RSS and Bluesky polling that only needs to insert rows |
+| Data jobs | Python 3.12 on GitHub Actions cron | NHL ingestion, metrics, xG, sentiment collectors (Reddit, Bluesky, YouTube, RSS), sentiment scoring, team grades |
+| Light scheduled jobs (optional, later) | Cloudflare Workers Cron Triggers | Only if a collector needs polling more often than GitHub Actions allows. Decided 2026-10-01 to keep all collectors in Python, since free Workers allow only 10 ms of CPU per run |
 | Raw archive | Cloudflare R2 | Store raw JSON from every API pull so metrics can be recomputed |
 | Auth | Clerk (or Supabase Auth if simpler) | Public sign-up with email and Google login |
 | Payments | Stripe Checkout, Stripe Customer Portal, Stripe Billing webhooks, Stripe Tax | Web only, no app store billing |
