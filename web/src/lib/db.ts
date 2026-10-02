@@ -1,6 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import postgres from "postgres";
 
+export type Sql = postgres.Sql;
+
 // On Cloudflare, connect through the Hyperdrive binding, which pools connections.
 // Outside a Cloudflare context, fall back to DATABASE_URL from the root .env file.
 async function connectionString(): Promise<string> {
@@ -15,14 +17,23 @@ async function connectionString(): Promise<string> {
   return url;
 }
 
-// Runs one query on a fresh connection. Workers cannot reuse connections across
-// requests, and Hyperdrive makes opening a new one cheap.
-export async function query<T extends Record<string, unknown>>(text: string, params: postgres.ParameterOrJSON<never>[] = []): Promise<T[]> {
+// Runs fn with one database connection, closed afterwards. Workers cannot reuse connections
+// across requests, and Hyperdrive makes opening a new one cheap. Use sql`...` tagged templates
+// so values are always sent as parameters, never pasted into the SQL text.
+export async function withDb<T>(fn: (sql: Sql) => Promise<T>): Promise<T> {
   // fetch_types off: skips an extra round trip that Hyperdrive does not need.
   const sql = postgres(await connectionString(), { max: 1, fetch_types: false });
   try {
-    return (await sql.unsafe<T[]>(text, params)) as T[];
+    return await fn(sql);
   } finally {
     await sql.end();
   }
+}
+
+// Runs one query on its own connection.
+export async function query<T extends Record<string, unknown>>(
+  text: string,
+  params: postgres.ParameterOrJSON<never>[] = [],
+): Promise<T[]> {
+  return withDb(async (sql) => (await sql.unsafe<T[]>(text, params)) as T[]);
 }
