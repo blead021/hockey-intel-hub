@@ -77,8 +77,17 @@ def test_google_news_keeps_headline_only_and_skips_undated():
     assert m.title == "Canucks win opener"
     assert m.author == "Vancouver Sun"
     assert m.text is None  # the summary only repeated the headline
-    assert m.source_item_id == "abc123"
     assert m.posted_at == datetime(2026, 10, 1, 3, tzinfo=UTC)
+    # Google News changes the guid on every request; the id must not follow it.
+    [again] = parse_feed(GOOGLE_NEWS_XML.replace(b"abc123", b"zzz999"), NEWS)
+    assert m.source_item_id.startswith("gn:")
+    assert again.source_item_id == m.source_item_id
+
+
+def test_plain_rss_keeps_its_guid():
+    feed = Feed(id=6, kind="rss", value="https://example.com/feed", team_id=None, audience="beat_writer")
+    [m] = parse_feed(GOOGLE_NEWS_XML, feed)
+    assert m.source_item_id == "abc123"
 
 
 def test_bad_feed_raises():

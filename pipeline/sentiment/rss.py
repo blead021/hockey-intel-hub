@@ -4,6 +4,7 @@ Stores the headline, a short snippet, the link, and the date only. Never full ar
 """
 
 import calendar
+import hashlib
 from datetime import UTC, datetime
 
 import feedparser
@@ -55,13 +56,17 @@ def parse_feed(content: bytes, feed: Feed) -> list[Mention]:
         # Google News summaries just repeat the headline and outlet, so drop those.
         if snippet.startswith(title):
             snippet = ""
+        posted_at = datetime.fromtimestamp(calendar.timegm(when), UTC)
+        if feed.kind == "google_news":
+            # Google News gives the same article a new id on every request, so use what stays fixed.
+            item_id = news_key(title, outlet, posted_at)
         mentions.append(
             Mention(
                 source="news_rss",
                 source_item_id=item_id,
                 kind="article",
                 audience=feed.audience,
-                posted_at=datetime.fromtimestamp(calendar.timegm(when), UTC),
+                posted_at=posted_at,
                 url=link,
                 author=entry.get("author") or outlet,
                 title=title,
@@ -70,3 +75,9 @@ def parse_feed(content: bytes, feed: Feed) -> list[Mention]:
             )
         )
     return mentions
+
+
+def news_key(title: str, outlet: str | None, posted_at: datetime) -> str:
+    """A stable id for a Google News article: headline, outlet, and publish time."""
+    basis = f"{title.strip().lower()}|{(outlet or '').strip().lower()}|{posted_at.isoformat()}"
+    return "gn:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
