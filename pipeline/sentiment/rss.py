@@ -59,7 +59,7 @@ def parse_feed(content: bytes, feed: Feed) -> list[Mention]:
         posted_at = datetime.fromtimestamp(calendar.timegm(when), UTC)
         if feed.kind == "google_news":
             # Google News gives the same article a new id on every request, so use what stays fixed.
-            item_id = news_key(title, outlet, posted_at)
+            item_id = news_key(title, outlet)
         mentions.append(
             Mention(
                 source="news_rss",
@@ -77,7 +77,10 @@ def parse_feed(content: bytes, feed: Feed) -> list[Mention]:
     return mentions
 
 
-def news_key(title: str, outlet: str | None, posted_at: datetime) -> str:
-    """A stable id for a Google News article: headline, outlet, and publish time."""
-    basis = f"{title.strip().lower()}|{(outlet or '').strip().lower()}|{posted_at.isoformat()}"
+def news_key(title: str, outlet: str | None) -> str:
+    """A stable id for a Google News article: headline and outlet.
+
+    Publish times are left out because outlets update and re-time stories.
+    """
+    basis = f"{title.strip().lower()}|{(outlet or '').strip().lower()}"
     return "gn:" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
