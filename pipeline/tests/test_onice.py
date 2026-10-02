@@ -107,3 +107,34 @@ def test_zone_from_coordinates():
     assert zone_for(True, 69, "left") == "O" and zone_for(False, 69, "left") == "D"
     assert zone_for(True, -69, "left") == "D" and zone_for(True, 20, "left") == "N"
     assert zone_for(True, 69, "right") == "D" and zone_for(True, None, "left") is None
+
+
+def test_expected_goals_and_high_danger_chances():
+    plays = [{**p, "eventId": n} for n, p in enumerate(PBP["plays"])]
+    pbp = {**PBP, "plays": plays}
+    # eventIds: 1 = 0:30 home shot, 3 = 1:00 away miss, 6 = 1:40 home goal, 7 = 1:50 blocked (never has xG)
+    xg = {1: 0.10, 3: 0.20, 6: 0.50, 7: 0.90}
+    r = compute_game(pbp, SHIFTS, xg)
+    home = r.teams[HOME]
+    assert (round(home.xgf, 2), round(home.xga, 2), home.hdcf, home.hdca) == (0.60, 0.20, 1, 1)
+    p15, p16 = line(r, 15), line(r, 16)
+    assert (round(p15.xgf, 2), round(p15.xga, 2)) == (0.10, 0.20)   # on for 0:30 and 1:00
+    assert (round(p16.xgf, 2), p16.hdcf) == (0.50, 1)               # on for the 1:40 goal only
+
+
+def test_shooting_and_goalie_totals():
+    from types import SimpleNamespace
+
+    from pipeline.metrics.onice import shooting_and_goalies
+
+    def row(event_id, shooter, goal, situation="1551", goalie=40, empty=0):
+        return SimpleNamespace(event_id=event_id, shooter_id=shooter, shooting_team=HOME, defending_team=AWAY,
+                               goalie_id=goalie, is_goal=goal, situation=situation, features={"empty_net": empty})
+
+    rows = [row(1, 11, 0), row(2, 11, 1, situation="1451"), row(3, 12, 1, goalie=None, empty=1), row(4, 11, 0)]
+    shooters, goalies = shooting_and_goalies(rows, {1: 0.1, 2: 0.3, 3: 0.8})  # event 4 has no xG: skipped
+    s11 = shooters[11]
+    assert (s11.shots, s11.goals, round(s11.ixg, 2), s11.shots_5v5, s11.goals_5v5, round(s11.ixg_5v5, 2)) == (2, 1, 0.4, 1, 0, 0.1)
+    assert (shooters[12].goals, round(shooters[12].ixg, 2)) == (1, 0.8)
+    g = goalies[40]  # the empty-net goal does not count against him
+    assert (g.shots_faced, g.goals_against, round(g.xga, 2)) == (2, 1, 0.4)

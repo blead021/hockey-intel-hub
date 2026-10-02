@@ -14,6 +14,9 @@ Definitions (CLAUDE.md section 6), all at 5v5 with both goalies in net:
 - 5v5 ice time counts the seconds when shift charts show 5 skaters and a goalie for each team.
 - Zone starts: shifts that began at a 5v5 faceoff, by zone from the player's view. The zone comes
   from the faceoff's rink coordinates and which end the home team defends.
+- Expected goals (xGF, xGA) sum the active xG model's value for unblocked shots; high-danger
+  chances (HDCF, HDCA) are unblocked shots with xG of 0.15 or more. The same run stores individual
+  shooting (ixG) and goalie xG against at all strengths.
 """
 
 import argparse
@@ -26,6 +29,8 @@ from pipeline.db import connect
 from pipeline.ingest.nhl import field as nhl_field
 from pipeline.ingest.nhl import toi_seconds
 from pipeline.jobs import job_run
+from pipeline.models import xg_score
+from pipeline.models.xg_features import shot_rows
 
 CORSI_EVENTS = {"goal", "shot-on-goal", "missed-shot", "blocked-shot"}
 FIVE_ON_FIVE = "1551"  # away goalie, away skaters, home skaters, home goalie
@@ -57,6 +62,10 @@ class Line:
     oz: int = 0
     nz: int = 0
     dz: int = 0
+    xgf: float = 0.0
+    xga: float = 0.0
+    hdcf: int = 0
+    hdca: int = 0
 
 
 @dataclass
@@ -117,7 +126,7 @@ def five_on_five_seconds(shifts: list[Shift], goalies: set[int], home: int, away
     return result
 
 
-def compute_game(pbp: dict, shift_body: dict) -> GameResult:
+def compute_game(pbp: dict, shift_body: dict, xg_by_event: dict[int, float] | None = None) -> GameResult:
     home = nhl_field(pbp, "homeTeam.id", "play-by-play")
     away = nhl_field(pbp, "awayTeam.id", "play-by-play")
     roster = {p["playerId"]: p for p in nhl_field(pbp, "rosterSpots", "play-by-play")}
@@ -178,17 +187,17 @@ def compute_game(pbp: dict, shift_body: dict) -> GameResult:
             unblocked = kind != "blocked-shot"
             on_goal = kind in ("shot-on-goal", "goal")
             goal = kind == "goal"
-            for team, sign in ((for_team, "f"), (against, "a")):
-                tl = result.teams[team]
+            xg = (xg_by_event or {}).get(play.get("eventId")) if unblocked else None
+            targets = [(result.teams[for_team], "f"), (result.teams[against], "a")]
+            targets += [(line(s.player_id, s.team_id), "f" if s.team_id == for_team else "a") for s in on_ice]
+            for tl, sign in targets:
                 for attr, counts in (("c", True), ("f", unblocked), ("s", on_goal), ("g", goal)):
                     if counts:
                         setattr(tl, attr + sign, getattr(tl, attr + sign) + 1)
-            for s in on_ice:
-                pl = line(s.player_id, s.team_id)
-                sign = "f" if s.team_id == for_team else "a"
-                for attr, counts in (("c", True), ("f", unblocked), ("s", on_goal), ("g", goal)):
-                    if counts:
-                        setattr(pl, attr + sign, getattr(pl, attr + sign) + 1)
+                if xg is not None:
+                    setattr(tl, "xg" + sign, getattr(tl, "xg" + sign) + xg)
+                    if xg >= xg_score.HIGH_DANGER:
+                        setattr(tl, "hdc" + sign, getattr(tl, "hdc" + sign) + 1)
 
         elif kind == "faceoff":
             starting = [s for s in shifts_by_period.get(period, []) if s.start == t]
@@ -201,26 +210,93 @@ def compute_game(pbp: dict, shift_body: dict) -> GameResult:
     return result
 
 
-def store(conn, game_id: int, result: GameResult) -> None:
+@dataclass
+class Shooting:
+    team_id: int
+    shots: int = 0
+    goals: int = 0
+    ixg: float = 0.0
+    shots_5v5: int = 0
+    goals_5v5: int = 0
+    ixg_5v5: float = 0.0
+
+
+@dataclass
+class GoalieXg:
+    team_id: int
+    shots_faced: int = 0
+    goals_against: int = 0
+    xga: float = 0.0
+
+
+def shooting_and_goalies(rows, xg_by_event: dict[int, float]) -> tuple[dict[int, Shooting], dict[int, GoalieXg]]:
+    """Individual shooting and goalie xG against, all strengths, from scored shot rows."""
+    shooters: dict[int, Shooting] = {}
+    goalies: dict[int, GoalieXg] = {}
+    for r in rows:
+        xg = xg_by_event.get(r.event_id)
+        if xg is None:
+            continue
+        if r.shooter_id:
+            sh = shooters.setdefault(r.shooter_id, Shooting(r.shooting_team))
+            sh.shots += 1
+            sh.goals += r.is_goal
+            sh.ixg += xg
+            if r.situation == FIVE_ON_FIVE:
+                sh.shots_5v5 += 1
+                sh.goals_5v5 += r.is_goal
+                sh.ixg_5v5 += xg
+        if r.goalie_id and not r.features["empty_net"]:
+            g = goalies.setdefault(r.goalie_id, GoalieXg(r.defending_team))
+            g.shots_faced += 1
+            g.goals_against += r.is_goal
+            g.xga += xg
+    return shooters, goalies
+
+
+def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, goalies: dict | None = None,
+          xg_version: str | None = None) -> None:
+    def xg(value: float) -> float | None:
+        return round(value, 3) if xg_version else None
+
+    def hd(value: int) -> int | None:
+        return value if xg_version else None
+
     with conn.transaction():
-        conn.execute("delete from player_game_onice where game_id = %s", (game_id,))
-        conn.execute("delete from team_game_onice where game_id = %s", (game_id,))
+        for table in ("player_game_onice", "team_game_onice", "player_game_shooting", "goalie_game_xg"):
+            conn.execute(f"delete from {table} where game_id = %s", (game_id,))
         with conn.cursor() as cur:
             cur.executemany(
                 """insert into player_game_onice (player_id, game_id, team_id, toi_5v5_sec, cf, ca, ff, fa, sf, sa,
-                       gf, ga, oz_starts, nz_starts, dz_starts)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       gf, ga, xgf, xga, hdcf, hdca, oz_starts, nz_starts, dz_starts)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
-                    (pid, game_id, team, l.toi, l.cf, l.ca, l.ff, l.fa, l.sf, l.sa, l.gf, l.ga, l.oz, l.nz, l.dz)
+                    (pid, game_id, team, l.toi, l.cf, l.ca, l.ff, l.fa, l.sf, l.sa, l.gf, l.ga,
+                     xg(l.xgf), xg(l.xga), hd(l.hdcf), hd(l.hdca), l.oz, l.nz, l.dz)
                     for pid, (team, l) in result.players.items()
                 ],
             )
             cur.executemany(
-                """insert into team_game_onice (team_id, game_id, toi_5v5_sec, cf, ca, ff, fa, sf, sa, gf, ga)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                [(team, game_id, l.toi, l.cf, l.ca, l.ff, l.fa, l.sf, l.sa, l.gf, l.ga) for team, l in result.teams.items()],
+                """insert into team_game_onice (team_id, game_id, toi_5v5_sec, cf, ca, ff, fa, sf, sa, gf, ga,
+                       xgf, xga, hdcf, hdca)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                [(team, game_id, l.toi, l.cf, l.ca, l.ff, l.fa, l.sf, l.sa, l.gf, l.ga,
+                  xg(l.xgf), xg(l.xga), hd(l.hdcf), hd(l.hdca)) for team, l in result.teams.items()],
             )
-        conn.execute("update games set onice_loaded_at = now() where id = %s", (game_id,))
+            if xg_version:
+                cur.executemany(
+                    """insert into player_game_shooting (player_id, game_id, team_id, shots, goals, ixg, shots_5v5,
+                           goals_5v5, ixg_5v5) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [(pid, game_id, sh.team_id, sh.shots, sh.goals, round(sh.ixg, 3), sh.shots_5v5, sh.goals_5v5,
+                      round(sh.ixg_5v5, 3)) for pid, sh in (shooters or {}).items()],
+                )
+                cur.executemany(
+                    """insert into goalie_game_xg (player_id, game_id, team_id, shots_faced, goals_against, xga)
+                       values (%s, %s, %s, %s, %s, %s)""",
+                    [(pid, game_id, g.team_id, g.shots_faced, g.goals_against, round(g.xga, 3))
+                     for pid, g in (goalies or {}).items()],
+                )
+        conn.execute("update games set onice_loaded_at = now(), xg_version = %s where id = %s", (xg_version, game_id))
 
 
 def load(game_id: int, season: int):
@@ -228,16 +304,27 @@ def load(game_id: int, season: int):
 
 
 def run(conn, games: list[tuple[int, int]], counts) -> None:
-    """Computes and stores the given (game_id, season) pairs, downloading from R2 in parallel."""
+    """Computes and stores the given (game_id, season) pairs, downloading from R2 in parallel.
+
+    Without an active xG model, everything except the xG columns is still computed.
+    """
+    try:
+        xg_version, model = xg_score.load(conn)
+    except xg_score.NoActiveModel:
+        xg_version, model = None, None
+        counts["no_xg_model"] = 1
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         for future in [pool.submit(load, gid, season) for gid, season in games]:
             try:
                 game_id, pbp, shifts = future.result()
-                result = compute_game(pbp, shifts)
+                rows = shot_rows(pbp) if model else []
+                xg_by_event = xg_score.score(model, rows) if model else {}
+                result = compute_game(pbp, shifts, xg_by_event)
                 if not result.players:
                     counts["games_without_shifts"] += 1
                     continue
-                store(conn, game_id, result)
+                shooters, goalies = shooting_and_goalies(rows, xg_by_event)
+                store(conn, game_id, result, shooters, goalies, xg_version)
                 counts["games_computed"] += 1
                 counts["shots_without_shooter"] += result.shots_without_shooter
             except archive.ArchiveUnavailable:
@@ -256,7 +343,7 @@ def main(argv: list[str] | None = None) -> None:
         games = conn.execute(
             f"""select id, season_id from games where stats_loaded_at is not null
                 {"and season_id = %s" if args.season else ""}
-                {"" if args.reload else "and (onice_loaded_at is null or onice_loaded_at < stats_loaded_at)"}
+                {"" if args.reload else "and (onice_loaded_at is null or onice_loaded_at < stats_loaded_at or xg_version is distinct from (select version from xg_models where active))"}
                 order by game_date, id""",
             (args.season,) if args.season else (),
         ).fetchall()
