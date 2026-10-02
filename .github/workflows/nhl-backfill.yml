@@ -11,7 +11,7 @@ on:
         description: "Season to load"
         required: true
         type: choice
-        options: ["all", "20232024", "20242025", "20252026", "20262027"]
+        options: ["all", "20222023", "20232024", "20242025", "20252026", "20262027"]
       reload:
         description: "Reload games already loaded"
         type: boolean
