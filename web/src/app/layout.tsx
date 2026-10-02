@@ -28,8 +28,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${heading.variable} ${body.variable} ${mono.variable}`}>
-      <body>
+    // suppressHydrationWarning: browser extensions (Grammarly, analytics opt-outs) add attributes
+    // to <html> and <body> before React loads. It applies to those two tags only, not their children.
+    <html lang="en" className={`${heading.variable} ${body.variable} ${mono.variable}`} suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <SiteHeader />
         {children}
       </body>

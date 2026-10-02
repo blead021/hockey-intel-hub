@@ -1,7 +1,8 @@
 """Nightly NHL load, and the backfill command for whole seasons.
 
 Usage:
-    python -m pipeline.ingest.nightly                      new finished games this season, plus rosters
+    python -m pipeline.ingest.nightly                      new finished games this season (and the last
+                                                           3 days again, for NHL corrections), plus rosters
     python -m pipeline.ingest.nightly --season 20232024    every finished game of that season not yet loaded
     python -m pipeline.ingest.nightly --reload             reload games already loaded (with --season)
 
@@ -17,6 +18,7 @@ from pipeline.jobs import job_run
 from pipeline.sources import require_enabled
 
 MAX_FAILURE_RATE = 0.05
+RELOAD_RECENT_DAYS = 3
 
 
 def current_season(today: date | None = None) -> int:
@@ -46,13 +48,14 @@ def main(argv: list[str] | None = None) -> None:
         nhl_teams.refresh(conn, http, counts)
         counts["schedule_games"] = nhl_games.sync_schedule(conn, http, season)
 
-        # Finished games only, up to yesterday (today's games may still be in progress).
+        # Finished games only, up to yesterday (today's games may still be in progress). The NHL corrects
+        # boxscores for a few days after a game (starting goalies, assists), so recent games are reloaded too.
         pending = conn.execute(
             f"""select id, season_id, game_date from games
                 where season_id = %s and game_date < current_date and state in ('OFF', 'FINAL')
-                {"" if args.reload else "and stats_loaded_at is null"}
+                {"" if args.reload else "and (stats_loaded_at is null or game_date >= current_date - %s)"}
                 order by game_date, id""",
-            (season,),
+            (season,) if args.reload else (season, RELOAD_RECENT_DAYS),
         ).fetchall()
         counts["games_pending"] = len(pending)
         failed = nhl_games.load_games(conn, http, [(gid, sid) for gid, sid, _ in pending], counts)
