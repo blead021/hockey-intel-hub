@@ -91,8 +91,8 @@ save as CSV, and push. Each run loads the file first. Columns:
 
 | Column | Meaning |
 |---|---|
-| kind | `subreddit`, `bluesky_account`, `bluesky_search`, `rss`, `google_news`, or `youtube_channel` |
-| value | Subreddit name, Bluesky handle, search words, feed URL, or YouTube handle (like `@canucks`) |
+| kind | `subreddit`, `bluesky_account`, `bluesky_starter_pack`, `bluesky_search`, `rss`, `google_news`, or `youtube_channel` |
+| value | Subreddit name, Bluesky handle, starter pack link, search words, feed URL, or YouTube handle (like `@canucks`) |
 | team | Team code like `VAN`, or blank for league-wide |
 | audience | `fan`, `beat_writer`, or `media` |
 | label, notes | For people; not used by the code |

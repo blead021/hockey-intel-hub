@@ -98,3 +98,80 @@ bluesky_search,"""Vancouver Canucks""",VAN,fan,Bluesky search: Vancouver Canucks
 bluesky_search,"""Vegas Golden Knights""",VGK,fan,Bluesky search: Vegas Golden Knights,yes,Needs Bluesky app password
 bluesky_search,"""Winnipeg Jets""",WPG,fan,Bluesky search: Winnipeg Jets,yes,Needs Bluesky app password
 bluesky_search,"""Washington Capitals""",WSH,fan,Bluesky search: Washington Capitals,yes,Needs Bluesky app password
+youtube_channel,@anaheimducks,ANA,media,YouTube: ANA official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@bostonbruinsnhl,BOS,media,YouTube: BOS official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@buffalosabres,BUF,media,YouTube: BUF official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@carolinahurricanes,CAR,media,YouTube: CAR official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@bluejacketsnhl,CBJ,media,YouTube: CBJ official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@nhlflames,CGY,media,YouTube: CGY official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@blackhawks,CHI,media,YouTube: CHI official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@coloradoavalanche,COL,media,YouTube: COL official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@dallasstars,DAL,media,YouTube: DAL official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@officialredwings,DET,media,YouTube: DET official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@edmontonoilers,EDM,media,YouTube: EDM official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@flapanthers,FLA,media,YouTube: FLA official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@lakings,LAK,media,YouTube: LAK official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@mnwild,MIN,media,YouTube: MIN official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@canadiensmtl,MTL,media,YouTube: MTL official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@njdevils,NJD,media,YouTube: NJD official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@nashvillepredatorsnhl,NSH,media,YouTube: NSH official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@ny_islanders,NYI,media,YouTube: NYI official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@nyrangers,NYR,media,YouTube: NYR official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@ottawasenatorsnhl,OTT,media,YouTube: OTT official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@philadelphiaflyers,PHI,media,YouTube: PHI official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@penguins,PIT,media,YouTube: PIT official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@seattlekraken,SEA,media,YouTube: SEA official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@sanjosesharks,SJS,media,YouTube: SJS official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@stlouisblues,STL,media,YouTube: STL official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@tblightningnhl,TBL,media,YouTube: TBL official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@torontomapleleafs,TOR,media,YouTube: TOR official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@utahmammoth,UTA,media,YouTube: UTA official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@canucks1970,VAN,media,YouTube: VAN official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@vegasgoldenknights,VGK,media,YouTube: VGK official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@nhljets,WPG,media,YouTube: WPG official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@capitals,WSH,media,YouTube: WSH official,yes,Team channel; viewer comments are tagged fan
+youtube_channel,@lockedonanaheimducks,ANA,media,YouTube: Locked On (ANA),yes,Locked On podcast
+youtube_channel,@lockedonbostonbruins,BOS,media,YouTube: Locked On (BOS),yes,Locked On podcast
+youtube_channel,@lockedonsabres,BUF,media,YouTube: Locked On (BUF),yes,Locked On podcast
+youtube_channel,@lockedonhurricanes,CAR,media,YouTube: Locked On (CAR),yes,Locked On podcast
+youtube_channel,@lockedonbluejackets,CBJ,media,YouTube: Locked On (CBJ),yes,Locked On podcast
+youtube_channel,@lockedonflames,CGY,media,YouTube: Locked On (CGY),yes,Locked On podcast
+youtube_channel,@lockedonblackhawks,CHI,media,YouTube: Locked On (CHI),yes,Locked On podcast
+youtube_channel,@lockedonavalanche,COL,media,YouTube: Locked On (COL),yes,Locked On podcast
+youtube_channel,@lockedonstars,DAL,media,YouTube: Locked On (DAL),yes,Locked On podcast
+youtube_channel,@lockedonredwings,DET,media,YouTube: Locked On (DET),yes,Locked On podcast
+youtube_channel,@lockedonoilers,EDM,media,YouTube: Locked On (EDM),yes,Locked On podcast
+youtube_channel,@lockedonpanthersnhl,FLA,media,YouTube: Locked On (FLA),yes,Locked On podcast
+youtube_channel,@lockedonkingsnhl,LAK,media,YouTube: Locked On (LAK),yes,Locked On podcast
+youtube_channel,@lockedonwild,MIN,media,YouTube: Locked On (MIN),yes,Locked On podcast
+youtube_channel,@lockedoncanadiens,MTL,media,YouTube: Locked On (MTL),yes,Locked On podcast
+youtube_channel,@lockedondevils,NJD,media,YouTube: Locked On (NJD),yes,Locked On podcast
+youtube_channel,@lockedonpredators,NSH,media,YouTube: Locked On (NSH),yes,Locked On podcast
+youtube_channel,@lockedonislanders,NYI,media,YouTube: Locked On (NYI),yes,Locked On podcast
+youtube_channel,@lockedonrangersnhl,NYR,media,YouTube: Locked On (NYR),yes,Locked On podcast
+youtube_channel,@lockedonsenators,OTT,media,YouTube: Locked On (OTT),yes,Locked On podcast
+youtube_channel,@lockedonflyers,PHI,media,YouTube: Locked On (PHI),yes,Locked On podcast
+youtube_channel,@lockedonpenguins,PIT,media,YouTube: Locked On (PIT),yes,Locked On podcast
+youtube_channel,@lockedonkraken,SEA,media,YouTube: Locked On (SEA),yes,Locked On podcast
+youtube_channel,@lockedonsharks,SJS,media,YouTube: Locked On (SJS),yes,Locked On podcast
+youtube_channel,@lockedonblues,STL,media,YouTube: Locked On (STL),yes,Locked On podcast
+youtube_channel,@lockedonlightning,TBL,media,YouTube: Locked On (TBL),yes,Locked On podcast
+youtube_channel,@lockedonleafs,TOR,media,YouTube: Locked On (TOR),yes,Locked On podcast
+youtube_channel,@lockedonmammoth,UTA,media,YouTube: Locked On (UTA),yes,Locked On podcast
+youtube_channel,@lockedoncanucks,VAN,media,YouTube: Locked On (VAN),yes,Locked On podcast
+youtube_channel,@lockedonvegasgoldenknights,VGK,media,YouTube: Locked On (VGK),yes,Locked On podcast
+youtube_channel,@lockedonjetsnhl,WPG,media,YouTube: Locked On (WPG),yes,Locked On podcast
+youtube_channel,@lockedoncapitals,WSH,media,YouTube: Locked On (WSH),yes,Locked On podcast
+youtube_channel,@lockedonnhl,,media,YouTube: Locked On NHL,yes,Media channel
+youtube_channel,@lockedonnhlprospects,,media,YouTube: Locked On NHL Prospects,yes,Media channel
+youtube_channel,@daily_faceoff,,media,YouTube: Daily Faceoff,yes,Media channel
+youtube_channel,@dfoedmonton,EDM,media,YouTube: Daily Faceoff Edmonton,yes,Media channel
+youtube_channel,@dfotoronto,TOR,media,YouTube: Daily Faceoff Toronto,yes,Media channel
+youtube_channel,@dfovancouver,VAN,media,YouTube: Daily Faceoff Vancouver,yes,Media channel
+youtube_channel,@dfofantasy,,media,YouTube: DFO Fantasy,yes,Media channel
+bluesky_starter_pack,https://bsky.app/starter-pack/anthonymingioni.bsky.social/3lcg6mjmjiz2p,,beat_writer,Bluesky pack: Recommended Hockey Writers (anthonymingioni),yes,Every member counts as beat_writer
+bluesky_starter_pack,https://bsky.app/starter-pack/marklazerus.bsky.social/3lgml5ek7772a,,beat_writer,Bluesky pack: NHL Writers (marklazerus),yes,Every member counts as beat_writer
+bluesky_starter_pack,https://bsky.app/starter-pack/fantasysportsspot.net/3lbadteq77g24,,beat_writer,Bluesky pack: NHL/PWHL Starter Pack (fantasysportsspot),yes,Every member counts as beat_writer
+bluesky_starter_pack,https://bsky.app/starter-pack/ryanwilson.bsky.social/3m52quldkka2c,,beat_writer,Bluesky pack: Hockey Hot Stove writers (ryanwilson),yes,Every member counts as beat_writer
+bluesky_starter_pack,https://bsky.app/starter-pack/offsidenewsco.bsky.social/3lauf6i2qcd22,,beat_writer,Bluesky pack: Offside News Co (offsidenewsco),yes,Every member counts as beat_writer
+bluesky_starter_pack,https://bsky.app/starter-pack/cktwenty.bsky.social/3lafqunxkon2f,,beat_writer,Bluesky pack: the best of hockey social (cktwenty),yes,Every member counts as beat_writer

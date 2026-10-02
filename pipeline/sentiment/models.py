@@ -1,5 +1,6 @@
 """Shared types for the sentiment collectors."""
 
+import hashlib
 import html
 import re
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from datetime import UTC, datetime
 from psycopg.types.json import Jsonb
 
 MAX_TEXT = 5000
+MAX_ITEM_ID = 200  # longer ids (some Google News guids run to thousands of characters) are hashed
 NEWS_SNIPPET = 300
 
 
@@ -66,13 +68,20 @@ def from_iso(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def item_id(value: str) -> str:
+    """Keeps ids short enough for the unique index, without losing uniqueness."""
+    if len(value) <= MAX_ITEM_ID:
+        return value
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def save_mentions(conn, feed: Feed, mentions: list[Mention], archive_key: str | None) -> int:
     """Inserts new mentions in one batch and returns how many were new. Items already stored are skipped."""
     if not mentions:
         return 0
     rows = [
         (
-            m.source, m.source_item_id, feed.id, m.kind, m.audience,
+            m.source, item_id(m.source_item_id), feed.id, m.kind, m.audience,
             m.team_id if m.team_id is not None else feed.team_id,
             m.url, m.author, m.posted_at, clip(m.title, 500), clip(m.text), m.thread_id,
             Jsonb(m.raw), archive_key,

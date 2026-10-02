@@ -13,7 +13,9 @@ from pathlib import Path
 from pipeline.db import connect
 
 CSV_PATH = Path(__file__).with_name("feeds.csv")
-KINDS = {"subreddit", "bluesky_account", "bluesky_search", "rss", "google_news", "youtube_channel"}
+KINDS = {
+    "subreddit", "bluesky_account", "bluesky_starter_pack", "bluesky_search", "rss", "google_news", "youtube_channel",
+}
 AUDIENCES = {"fan", "beat_writer", "media"}
 COLUMNS = ["kind", "value", "team", "audience", "label", "active", "notes"]
 
