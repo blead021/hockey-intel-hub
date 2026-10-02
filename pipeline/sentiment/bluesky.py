@@ -26,7 +26,8 @@ class Collector:
     def __init__(self, http, feeds: list[Feed]):
         self.http = http
         self._accounts = {f.value for f in feeds if f.kind == "bluesky_account"}
-        self._packs = [f.value for f in feeds if f.kind == "bluesky_starter_pack"]
+        # Only writer packs mark their members as beat_writer; fan community packs do not.
+        self._packs = [f.value for f in feeds if f.kind == "bluesky_starter_pack" and f.audience == "beat_writer"]
         self._writers: set[str] | None = None
         self._token: str | None = None
 
