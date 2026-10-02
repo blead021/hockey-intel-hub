@@ -385,7 +385,8 @@ function AdvancedSection({ advanced, position }: { advanced: SkaterAdvanced | un
           </dl>
           <p className="mt-4 text-xs text-muted">
             xGF% is his team&apos;s share of 5v5 expected goals while he was on the ice, from our own expected goals model;
-            HDCF% counts only high-danger chances (xG of 0.15 or more). CF% is the share of shot attempts; relative
+            HDCF% counts only high-danger chances (xG of 0.15 or more). IPP is the share of his team&apos;s 5v5 goals
+            while he was on the ice that he scored or assisted on. CF% is the share of shot attempts; relative
             stats compare him with his team when he was off the ice. Goals above expected and ixG/60 use his own shots
             at all strengths. A shot blocked by a teammate counts as an attempt by the shooter&apos;s team.
           </p>

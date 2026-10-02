@@ -394,11 +394,11 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
       cf_pct: number | null; rel_cf_pct: number | null; ff_pct: number | null; gf_pct: number | null;
       pdo: number | null; ozs_pct: number | null; cf60: number | null; ca60: number | null;
       xgf_pct: number | null; rel_xgf_pct: number | null; hdcf_pct: number | null;
-      ixg: number | null; gax: number | null; ixg60: number | null;
+      ixg: number | null; gax: number | null; ixg60: number | null; ipp: number | null;
       p_cf_pct: number | null; p_rel_cf_pct: number | null; p_ff_pct: number | null; p_gf_pct: number | null;
       p_pdo: number | null; p_ozs_pct: number | null; p_cf60: number | null; p_ca60: number | null;
       p_xgf_pct: number | null; p_rel_xgf_pct: number | null; p_hdcf_pct: number | null;
-      p_gax: number | null; p_ixg60: number | null;
+      p_gax: number | null; p_ixg60: number | null; p_ipp: number | null;
     }[]
   >`
     with totals as (
@@ -419,6 +419,12 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
       from skater_season_shooting s left join xg_season_factor f on f.season_id = s.season_id
       where s.season_id = ${season} and s.game_type = 2
       group by s.player_id),
+    even_points as (
+      select s.player_id, sum(s.points_5v5)::float8 as pts
+      from game_skater_stats s join games g on g.id = s.game_id
+      where g.season_id = ${season} and g.game_type = 2
+        and exists (select 1 from player_game_onice o where o.player_id = s.player_id and o.game_id = s.game_id)
+      group by s.player_id),
     metrics as (
       select player_id, season_id, grp, gp, toi, toi >= 6000 as ranked,
              cf / nullif(cf + ca, 0) as cf_pct,
@@ -434,8 +440,9 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
              hdcf / nullif(hdcf + hdca, 0) as hdcf_pct,
              sh.ixg as ixg,
              sh.goals - sh.ixg as gax,
-             sh.ixg * 3600 / nullif(toi, 0) as ixg60
-      from totals left join shooting sh using (player_id)),
+             sh.ixg * 3600 / nullif(toi, 0) as ixg60,
+             ep.pts / nullif(gf, 0) as ipp
+      from totals left join shooting sh using (player_id) left join even_points ep using (player_id)),
     ranked as (
       select m.*,
         case when ranked then percent_rank() over (partition by grp, ranked order by cf_pct nulls first) end as p_cf_pct,
@@ -450,12 +457,13 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
         case when ranked then percent_rank() over (partition by grp, ranked order by rel_xgf_pct nulls first) end as p_rel_xgf_pct,
         case when ranked then percent_rank() over (partition by grp, ranked order by hdcf_pct nulls first) end as p_hdcf_pct,
         case when ranked then percent_rank() over (partition by grp, ranked order by gax nulls first) end as p_gax,
-        case when ranked then percent_rank() over (partition by grp, ranked order by ixg60 nulls first) end as p_ixg60
+        case when ranked then percent_rank() over (partition by grp, ranked order by ixg60 nulls first) end as p_ixg60,
+        case when ranked then percent_rank() over (partition by grp, ranked order by ipp nulls first) end as p_ipp
       from metrics m)
     select season_id, gp, toi as toi_5v5_sec, ranked, cf_pct, rel_cf_pct, ff_pct, gf_pct, pdo, ozs_pct, cf60, ca60,
-           xgf_pct, rel_xgf_pct, hdcf_pct, ixg, gax, ixg60,
+           xgf_pct, rel_xgf_pct, hdcf_pct, ixg, gax, ixg60, ipp,
            p_cf_pct, p_rel_cf_pct, p_ff_pct, p_gf_pct, p_pdo, p_ozs_pct, p_cf60, p_ca60,
-           p_xgf_pct, p_rel_xgf_pct, p_hdcf_pct, p_gax, p_ixg60
+           p_xgf_pct, p_rel_xgf_pct, p_hdcf_pct, p_gax, p_ixg60, p_ipp
     from ranked where player_id = ${playerId}`;
   const r = rows[0];
   if (!r) return undefined;
@@ -477,6 +485,7 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
       m("CA/60", r.ca60, r.p_ca60),
       m("ixG/60", r.ixg60, r.p_ixg60),
       m("Goals above expected", r.gax, r.p_gax),
+      m("IPP", r.ipp, r.p_ipp),
       m("PDO", r.pdo, r.p_pdo),
       m("OZS%", r.ozs_pct, r.p_ozs_pct),
     ],

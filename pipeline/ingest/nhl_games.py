@@ -109,6 +109,7 @@ def store_game(conn, fetched: FetchedGame, counts) -> None:
     skaters, goalies = nhl.parse_boxscore(fetched.box)
     credits = nhl.pbp_credits(fetched.pbp)
     penalties = nhl.penalty_counts(fetched.pbp)
+    even_points = nhl.points_5v5(fetched.pbp)
     for s in skaters:
         c = credits.get(s.player_id, {})
         s.a1, s.a2, s.fow, s.fol = c.get("a1", 0), c.get("a2", 0), c.get("fow", 0), c.get("fol", 0)
@@ -128,12 +129,13 @@ def store_game(conn, fetched: FetchedGame, counts) -> None:
             cur.executemany(
                 """insert into game_skater_stats (player_id, game_id, team_id, position, g, a1, a2, sog, hits,
                        blocks, pim, plus_minus, giveaways, takeaways, shifts, toi_sec, fow, fol,
-                       penalties_drawn, penalties_taken)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       penalties_drawn, penalties_taken, points_5v5)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
                     (s.player_id, fetched.game_id, s.team_id, s.position, s.g, s.a1, s.a2, s.sog, s.hits,
                      s.blocks, s.pim, s.plus_minus, s.giveaways, s.takeaways, s.shifts, s.toi_sec, s.fow, s.fol,
-                     penalties.get(s.player_id, {}).get("drawn", 0), penalties.get(s.player_id, {}).get("taken", 0))
+                     penalties.get(s.player_id, {}).get("drawn", 0), penalties.get(s.player_id, {}).get("taken", 0),
+                     even_points.get(s.player_id, 0))
                     for s in skaters
                 ],
             )

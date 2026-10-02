@@ -271,6 +271,21 @@ def penalty_counts(pbp: dict) -> dict[int, dict[str, int]]:
     return counts
 
 
+def points_5v5(pbp: dict) -> dict[int, int]:
+    """Points (goal or either assist) on goals scored at 5v5 with both goalies in net, per player."""
+    points: dict[int, int] = {}
+    for play in field(pbp, "plays", "play-by-play"):
+        details = play.get("details") or {}
+        if play.get("typeDescKey") != "goal" or play.get("situationCode") != "1551":
+            continue
+        if (play.get("periodDescriptor") or {}).get("periodType") == "SO":
+            continue
+        for key in ("scoringPlayerId", "assist1PlayerId", "assist2PlayerId"):
+            if details.get(key):
+                points[details[key]] = points.get(details[key], 0) + 1
+    return points
+
+
 @dataclass(frozen=True)
 class PlayerInfo:
     id: int

@@ -164,6 +164,16 @@ def test_current_season_rolls_over_in_september():
     assert current_season(date(2027, 9, 1)) == 20272028
 
 
+def test_points_5v5_only_counts_even_strength_goals():
+    plays = [
+        {**_goal(20, 1, a1=21, a2=22), "situationCode": "1551"},
+        {**_goal(10, 4, a1=11), "situationCode": "1451"},          # power play: not 5v5
+        {**_goal(20, 1, a1=21), "situationCode": "0651"},          # empty net: not 5v5
+        {**_goal(20, 1, period="SO"), "situationCode": "1551"},   # shootout
+    ]
+    assert nhl.points_5v5({"plays": plays}) == {20: 1, 21: 1, 22: 1}
+
+
 def test_penalty_counts_skip_misconducts_and_bench_minors():
     pbp = {"plays": [
         {"typeDescKey": "penalty", "details": {"typeCode": "MIN", "committedByPlayerId": 1, "drawnByPlayerId": 2}},
