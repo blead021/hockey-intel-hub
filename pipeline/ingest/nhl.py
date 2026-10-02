@@ -183,6 +183,8 @@ def parse_boxscore(box: dict) -> tuple[list[SkaterLine], list[GoalieLine]]:
         for group in ("forwards", "defense"):
             for p in field(team, group, f"boxscore {side}"):
                 where = f"boxscore skater {p.get('playerId')}"
+                if toi_seconds(field(p, "toi", where)) == 0:
+                    continue  # dressed but never took a shift; the NHL does not count it as a game played
                 skaters.append(
                     SkaterLine(
                         player_id=field(p, "playerId", where),

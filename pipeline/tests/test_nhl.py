@@ -70,6 +70,13 @@ def test_toi_seconds():
     assert nhl.toi_seconds(None) == 0
 
 
+def test_boxscore_skips_skaters_and_goalies_who_never_played():
+    box = {**BOX, "playerByGameStats": {**BOX["playerByGameStats"], "homeTeam": {
+        **BOX["playerByGameStats"]["homeTeam"],
+        "defense": BOX["playerByGameStats"]["homeTeam"]["defense"] + [_skater(99, pos="D", toi="00:00")]}}}
+    assert 99 not in [s.player_id for s in nhl.parse_boxscore(box)[0]]
+
+
 def test_boxscore_skips_backup_goalie_and_splits_shots():
     skaters, goalies = nhl.parse_boxscore(BOX)
     assert len(skaters) == 5
