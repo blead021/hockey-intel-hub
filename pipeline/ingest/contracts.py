@@ -368,22 +368,35 @@ def main(argv: list[str] | None = None) -> int:
         kept: dict[tuple, ContractRow] = {}
         for r in good:
             who = matches[r.line] or r.player.lower()
-            # The same player with the same end season and cap hit is the same contract, even if one row
-            # lacks the start season (a traded player listed under both teams).
-            key = (who, "end", r.end_season, r.cap_hit) if r.end_season is not None else (who, r.start_season, r.line)
+            # A player has one contract per end season. Two rows for it (a traded player listed under both
+            # teams) are one contract, even if one row lacks the start season.
+            key = (who, "end", r.end_season) if r.end_season is not None else (who, r.start_season, r.line)
             if key not in kept:
                 kept[key] = r
                 continue
             first = kept[key]
-            pid = matches[r.line]
-            if pid and current_team.get(pid) == r.team and current_team.get(pid) != first.team:
-                kept[key], r, first = r, first, r
-            # Keep details only the dropped row has (start season, clause, and so on); the kept row's team stays.
-            merged = {k: (v if v is not None else getattr(r, k)) for k, v in first.__dict__.items()}
-            kept[key] = first = ContractRow(**merged)
-            result.problems.append((r.line, r.player,
-                                    f"duplicate of row {first.line} (same player and contract); kept row {first.line} "
-                                    f"({first.team}), this row not loaded"))
+            note = ""
+            low, high = sorted((first, r), key=lambda x: x.cap_hit or 0)
+            if (first.team != r.team and low.cap_hit and high.cap_hit and low.cap_hit < high.cap_hit
+                    and low.cap_hit >= high.cap_hit * 0.5 and not (low.retained_pct or high.retained_pct)):
+                # Different cap hits on two teams: the lower one is the acquiring team's share after the
+                # other team retained salary (at most 50%). Arithmetic on the two stated cap hits.
+                pct = round((1 - low.cap_hit / high.cap_hit) * 100, 1)
+                kept_row, dropped = low, high
+                merged = {k: (v if v is not None else getattr(dropped, k)) for k, v in kept_row.__dict__.items()}
+                merged.update(cap_hit=high.cap_hit, aav=high.aav or high.cap_hit, retained_pct=pct, retained_by=high.team)
+                note = f"; read as {low.team} with {high.team} retaining {pct}%"
+            else:
+                pid = matches[r.line]
+                if pid and current_team.get(pid) == r.team and current_team.get(pid) != first.team:
+                    first, r = r, first
+                kept_row, dropped = first, r
+                # Keep details only the dropped row has (start season, clause, and so on); the kept row's team stays.
+                merged = {k: (v if v is not None else getattr(dropped, k)) for k, v in kept_row.__dict__.items()}
+            kept[key] = ContractRow(**merged)
+            result.problems.append((dropped.line, dropped.player,
+                                    f"duplicate of row {kept_row.line} (same player and contract); kept row "
+                                    f"{kept_row.line} ({kept_row.team}), this row not loaded{note}"))
         good = sorted(kept.values(), key=lambda r: r.line)
         unmatched = [r for r in good if matches[r.line] is None]
         for r in unmatched:

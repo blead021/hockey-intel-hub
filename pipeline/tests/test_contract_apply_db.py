@@ -133,7 +133,9 @@ def test_backfill_only_adds_missing_contracts_still_in_force(conn, setup):
     before = _contracts(conn, player_id)
     # A player with a contract on file is never changed, even by a signing or a trade.
     assert backfill.apply(_t(type="extension", player_name=name, team=team, cap_hit=9_000_000, years=3), NEWS) == "skipped_on_file"
-    assert backfill.apply(_t(type="trade", player_name=name, team=other, from_team=team), NEWS) == "skipped_type"
+    # He is on his team's NHL roster, so a trade elsewhere or a buyout from old news is not recorded.
+    assert backfill.apply(_t(type="trade", player_name=name, team=other, from_team=team), NEWS) == "skipped_roster_disagrees"
+    assert backfill.apply(_t(type="buyout", player_name=name, team=team), NEWS) == "skipped_roster_disagrees"
     assert _contracts(conn, player_id) == before
     # A depth player with no contract: an expired deal is skipped, one still in force is added.
     old = _t(type="signing", player_name="Backfill Testplayer", team=team, cap_hit=775_000,

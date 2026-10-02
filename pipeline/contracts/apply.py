@@ -109,8 +109,10 @@ def _as_text(value) -> str | None:
 
 class Applier:
     def __init__(self, conn, run_id: int | None, model: str, teams: dict[str, int], create_only: bool = False):
-        """create_only (the one-time backfill from old news): only add contracts that are still in force for
-        players with none on file; never change or end a contract already on file."""
+        """create_only (the one-time backfill from older news): never rewrite the terms of a contract on
+        file. Add a contract only for a player with none, and only if it is still in force. Record a trade
+        or waiver claim only if the NHL roster agrees (or the player is on no roster, as when injured), and
+        a buyout or termination only if the player is on no NHL roster."""
         self.conn, self.run_id, self.model, self.teams = conn, run_id, model, teams
         self.create_only = create_only
 
@@ -142,10 +144,13 @@ class Applier:
         if t["status"] != "completed":
             return "skipped_unconfirmed", f"news says {t['status']}, not completed", []
         if self.create_only:
-            if t["type"] not in CONTRACT_TYPES:
-                return "skipped_type", "backfill only adds contracts", []
-            if self._on_file(t["player_name"], player_id):
+            roster_team = self._roster_team(player_id)
+            if t["type"] in CONTRACT_TYPES and self._on_file(t["player_name"], player_id):
                 return "skipped_on_file", "backfill never changes a contract already on file", []
+            if t["type"] in TEAM_MOVES and roster_team is not None and roster_team != team_id:
+                return "skipped_roster_disagrees", "the NHL roster shows him on another team", []
+            if t["type"] in ENDINGS and roster_team is not None:
+                return "skipped_roster_disagrees", "he is on an NHL roster", []
         if t["type"] in CONTRACT_TYPES:
             if team_id is None:
                 return "skipped_unmatched", f"unknown team {t.get('team')!r}", []
@@ -159,6 +164,12 @@ class Applier:
         if t["type"] in ENDINGS:
             return self._end(t, player_id)
         return "skipped_type", f"{t['type']} does not change a contract", []
+
+    def _roster_team(self, player_id: int | None) -> int | None:
+        if not player_id:
+            return None
+        row = self.conn.execute("select current_team_id from players where id = %s", (player_id,)).fetchone()
+        return row[0] if row else None
 
     def _on_file(self, name: str, player_id: int | None) -> bool:
         if player_id:

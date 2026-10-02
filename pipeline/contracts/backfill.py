@@ -78,7 +78,8 @@ def search(conn, http, counts) -> None:
 
 NEWEST = """select id from (
     select id, query, row_number() over (partition by query order by published_at desc nulls last, id) as n
-    from contract_news where status = 'backfill') r where n <= %s or query like 'backfill team %%'"""
+    from contract_news where status = 'backfill') r
+    where n <= %s or query like 'backfill team %%' or query like 'backfill check %%' or query = 'backfill offseason'"""
 
 
 TEAM_QUERIES = [
@@ -119,7 +120,8 @@ def prune(conn) -> None:
     conn.execute(
         """update contract_news set status = 'skipped', processed_at = now(),
                error = 'backfill: player now covered by the contracts file'
-           where status = 'backfill' and query not like 'backfill team %%'"""
+           where status = 'backfill' and query not like 'backfill team %%' and query not like 'backfill check %%'
+             and query <> 'backfill offseason'"""
     )
     on_file = {
         normalize(n) for (n,) in conn.execute(
@@ -128,7 +130,8 @@ def prune(conn) -> None:
         )
     }
     drop = [
-        news_id for news_id, title in conn.execute("select id, title from contract_news where status = 'backfill'")
+        news_id for news_id, title in conn.execute(
+            "select id, title from contract_news where status = 'backfill' and query like 'backfill team %%'")
         if any(f" {name} " in f" {normalize(title)} " for name in on_file)
     ]
     conn.execute(
@@ -136,6 +139,59 @@ def prune(conn) -> None:
                error = 'backfill: names a player whose contract is on file' where id = any(%s)""",
         (drop,),
     )
+
+
+OFFSEASON = "after:2026-06-01"
+
+
+def search_offseason(conn, http, counts) -> None:
+    """Every transaction since the offseason began: the daily job's searches over months instead of days."""
+    from pipeline.contracts.news import QUERIES
+
+    found: dict[str, object] = {}
+    for query in QUERIES:
+        response = request(http, "GET", GOOGLE_NEWS_URL,
+                           params={"q": f"{query} {OFFSEASON}", "hl": "en-US", "gl": "US", "ceid": "US:en"})
+        archive.save("contract_backfill", "offseason", {"query": query, "xml": response.text})
+        for i in parse_results(response.content, "backfill offseason"):
+            if is_candidate(i):
+                found.setdefault(i.id, i)
+        time.sleep(PAUSE_SECONDS)
+    _save(conn, found.values())
+    counts["offseason_headlines"] = len(found)
+
+
+def check_players(conn, http, counts) -> None:
+    """Players whose contract may be out of date: filed under a team other than his NHL roster team, or
+    with a real contract ($1M+) while on no NHL roster or prospect list. Each gets a search of news since
+    the offseason began for trades, waivers, buyouts, and terminations."""
+    rows = conn.execute(
+        """select distinct p.id, p.first_name || ' ' || p.last_name
+           from contracts c join players p on p.id = c.player_id
+           where c.status = 'active' and (
+             (p.current_team_id is not null and p.current_team_id <> c.team_id)
+             or (p.current_team_id is null and p.rights_team_id is null and c.cap_hit >= 1000000))"""
+    ).fetchall()
+    for player_id, name in rows:
+        query = (f'"{name}" (traded OR trade OR waivers OR claimed OR buyout OR "bought out" OR terminated OR signs) '
+                 f"{OFFSEASON}")
+        response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+        archive.save("contract_backfill", f"check-{player_id}", {"query": query, "xml": response.text})
+        items = [i for i in parse_results(response.content, f"backfill check {player_id}")
+                 if is_candidate(i) and mentions_player(i.title, name)]
+        _save(conn, items)
+        counts["players_checked"] += 1
+        counts["check_headlines"] += len(items)
+        time.sleep(PAUSE_SECONDS)
+
+
+def _save(conn, items) -> None:
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            """insert into contract_news (id, title, outlet, url, published_at, query, status)
+               values (%s, %s, %s, %s, %s, %s, 'backfill') on conflict (id) do nothing""",
+            [(i.id, i.title, i.outlet, i.url, i.published_at, i.query) for i in items],
+        )
 
 
 def estimate(conn) -> None:
@@ -167,6 +223,7 @@ def main(argv: list[str] | None = None) -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--search", action="store_true")
     mode.add_argument("--teams", help="comma-separated team codes short of contracts, for example PHI,COL")
+    mode.add_argument("--check", action="store_true", help="offseason transactions and flagged players (free)")
     mode.add_argument("--estimate", action="store_true")
     mode.add_argument("--release", action="store_true")
     args = parser.parse_args(argv)
@@ -178,6 +235,11 @@ def main(argv: list[str] | None = None) -> None:
         with job_run("contract_backfill_teams") as counts, connect(autocommit=True) as conn, client() as http:
             search_teams(conn, http, [t.strip().upper() for t in args.teams.split(",")], counts)
             print(f"team search ok: {dict(counts)}")
+    if args.check:
+        with job_run("contract_backfill_check") as counts, connect(autocommit=True) as conn, client() as http:
+            search_offseason(conn, http, counts)
+            check_players(conn, http, counts)
+            print(f"check search ok: {dict(counts)}")
     with connect(autocommit=True) as conn:
         if args.release:
             release(conn)
