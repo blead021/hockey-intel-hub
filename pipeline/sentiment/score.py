@@ -19,7 +19,7 @@ from collections import defaultdict
 
 from pipeline.db import connect
 from pipeline.jobs import job_run
-from pipeline.sources import require_enabled
+from pipeline.sources import is_enabled
 
 MODEL = os.environ.get("SENTIMENT_MODEL", "claude-haiku-4-5")
 MENTIONS_PER_REQUEST = 20
@@ -225,7 +225,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max", type=int, default=DEFAULT_MAX_MENTIONS, help="most mentions to submit this run")
     args = parser.parse_args(argv)
     with job_run("sentiment_score") as counts, connect(autocommit=True) as conn:
-        require_enabled(conn, "sentiment_scoring")
+        if not is_enabled(conn, "sentiment_scoring"):
+            counts["switched_off"] = 1
+            print("sentiment scoring is switched off (data_sources.sentiment_scoring); nothing sent.")
+            return
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise RuntimeError("ANTHROPIC_API_KEY is not set, so mentions cannot be scored.")
         client = anthropic.Anthropic()

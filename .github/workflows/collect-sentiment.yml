@@ -34,6 +34,7 @@ jobs:
       BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
       BLUESKY_APP_PASSWORD: ${{ secrets.BLUESKY_APP_PASSWORD }}
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -45,3 +46,9 @@ jobs:
         run: python -m pipeline.sentiment.feeds
       - name: Collect
         run: python -m pipeline.sentiment.collect --source "${{ inputs.source || 'all' }}"
+      - name: Match mentions to players
+        run: python -m pipeline.sentiment.match
+      - name: Score with Claude (skips while the sentiment_scoring switch is off)
+        run: python -m pipeline.sentiment.score
+      - name: Daily sentiment
+        run: python -m pipeline.sentiment.aggregate
