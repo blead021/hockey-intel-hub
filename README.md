@@ -101,6 +101,19 @@ save as CSV, and push. Each run loads the file first. Columns:
 A collector without its keys skips itself and says so in `job_runs`. A feed that keeps failing
 shows its error in `collector_state.last_error`.
 
+## Contracts
+
+| Task | Command |
+|---|---|
+| Load the starting contracts (once) | `python -m pipeline.ingest.contracts` (reads `contracts_template.xlsx`) |
+| Update contracts from today's news | `python -m pipeline.contracts.update` (runs daily on GitHub) |
+| Preview what Claude finds, change nothing | `python -m pipeline.contracts.update --dry-run` |
+| See recent contract changes and sources | `python -m pipeline.contracts.changes`, or `/contracts/changes` on the site |
+
+The daily job reads headlines only (mainly NHL.com team announcements), never contract database
+sites. Only completed transactions are applied, details the news leaves out keep their value on file,
+and every change is logged with its sources. Rules are in CLAUDE.md, section 3.
+
 ## Data source switches
 
 Every external source has a row in the `data_sources` table. To switch one off:
@@ -119,4 +132,4 @@ secrets for the web app. `.env.example` lists every name. Never commit real valu
 
 GitHub Actions secrets: `DATABASE_URL_UNPOOLED`, `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
 `R2_SECRET_ACCESS_KEY`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`,
-`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, `YOUTUBE_API_KEY`.
+`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, `YOUTUBE_API_KEY`, `ANTHROPIC_API_KEY`.

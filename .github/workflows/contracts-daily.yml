@@ -1,0 +1,38 @@
+# Daily: keep contracts current from team announcements and news coverage (Claude reads the headlines).
+# Every change is logged in contract_changes with its sources.
+name: Contracts daily
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # 13:00 UTC, after morning team announcements in North America
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print what Claude finds; change no contracts"
+        type: boolean
+        default: false
+
+concurrency:
+  group: contracts
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.DATABASE_URL_UNPOOLED }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ARCHIVE_REQUIRED: "1"
+      R2_BUCKET_RAW: hockey-intel-raw
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .
+      - run: python -m pipeline.contracts.update ${{ inputs.dry_run && '--dry-run' || '' }}

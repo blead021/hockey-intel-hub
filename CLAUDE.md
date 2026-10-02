@@ -91,8 +91,13 @@ Base: `https://api-web.nhle.com/v1/` and `https://api.nhle.com/stats/rest/en/`. 
 - Then train our own xG model (see section 6), which removes that dependency.
 
 ### Contracts
-- PuckPedia or CapWages. Start with a manually maintained CSV import (`/pipeline/ingest/contracts.py`) with columns: player, team, cap_hit, aav, start_season, end_season, expiry_status (UFA/RFA), clause (NMC, NTC, M-NTC, none), no_trade_list_size, retained_pct, retained_by.
-- Refresh weekly and after trades. If a licensed API is obtained later, swap the loader only.
+- Starting data: Brian fills in `contracts_template.xlsx` (repo root) once, with every current contract. `python -m pipeline.ingest.contracts` loads it. Columns: player, team, cap_hit, aav, start_season, end_season, expiry_status (UFA/RFA), clause (NMC, NTC, M-NTC, none), no_trade_list_size, retained_pct, retained_by. Required: player, team, cap_hit, start_season, end_season. Every row with a player and a team is loaded; missing or unreadable details are stored as unknown, and every such row is reported to Brian. Loading again refuses to erase news updates unless `--replace` is given.
+- After that, contracts stay current automatically with no manual work from Brian. The daily job `python -m pipeline.contracts.update` (GitHub Actions, `contracts-daily.yml`) reads headlines of official team announcements and news coverage (Google News results, mainly NHL.com), uses Claude (`CONTRACTS_MODEL`, default `claude-opus-5-5`) to extract signings, extensions, trades (including retained salary), buyouts, terminations, waiver claims, and entry-level contracts, and applies them under fixed rules in `pipeline/contracts/apply.py`.
+- Never scrape PuckPedia, Spotrac, CapWages, CapFriendly, or any other contract database site. The job also never downloads full articles; it reads headlines and feed summaries only.
+- Only completed transactions are applied. Reported deals and rumors are logged and skipped.
+- When the news does not mention a detail, keep the value on file. For a new contract, store missing details as unknown (NULL, shown as "unknown"). Never guess, and never ask Brian to fill anything in. The only derived values are arithmetic on stated facts (cap hit = total value / years; one end of a season range from the other end and the length; an extension's first season as the season after the contract in force ends), and the log says when one was used.
+- Log every change: `contract_events` (each transaction found, its outcome, and source links) and `contract_changes` (each field changed, old and new values, sources). Brian can see them at `/contracts/changes` on the site or with `python -m pipeline.contracts.changes`.
+- Behind the `contract_news` data source switch. The Claude API is a paid service (estimated $3-5 per month at current volume); it needs `ANTHROPIC_API_KEY`.
 - Cap ceiling 2026-27: $104,000,000. Store per season in a `cap_limits` table.
 
 ### HockeyStatCards
@@ -133,7 +138,7 @@ Stats:
 - `edge_player_stats` (player_id, season, as_of, oz_time_pct, dz_time_pct, top_speed, bursts_20plus, max_shot_speed)
 - `hsc_game_scores` (player_id, game_id, game_score, raw_fields jsonb, verified bool)
 
-Money and value: `contracts`, `player_value` (player_id, as_of, war_proj, market_aav_est, surplus)
+Money and value: `contracts` (adds status active/bought_out/terminated, contract_type, source starting_file/news; unknown details are NULL), `contract_news` (headlines read), `contract_events` (transactions found and their outcome), `contract_changes` (every field changed, with sources), `player_value` (player_id, as_of, war_proj, market_aav_est, surplus)
 
 Sentiment: `mentions` (id, source, audience, url, author, posted_at, text, raw jsonb), `mention_players` (mention_id, player_id, confidence, sentiment -1..1, is_trade_related, summary), `sentiment_daily` (player_id, date, audience, score_0_100, n_mentions, trade_mentions)
 
@@ -222,7 +227,7 @@ Monorepo scaffold, Neon database, migrations runner, Next.js on Cloudflare (Open
 The season is starting and sentiment history cannot be backfilled, so start collecting now: Reddit, Bluesky, YouTube, and RSS collectors writing raw mentions to `mentions` and R2 on a schedule. Scoring comes later.
 
 ### Phase 2: Core stats and rosters
-Players, aliases, rosters, games, boxscores, play-by-play, shifts, EDGE. Nightly job plus a backfill command for the current and past three seasons. Contracts CSV import. Team Roster and Player Profile pages on real data (no login yet).
+Players, aliases, rosters, games, boxscores, play-by-play, shifts, EDGE. Nightly job plus a backfill command for the current and past three seasons. Contracts: one-time import of `contracts_template.xlsx`, then the automated daily contract news job. Team Roster and Player Profile pages on real data (no login yet).
 Done when: any team's roster page and any player's profile render real numbers that match NHL.com for spot-checked games.
 
 ### Phase 3: Advanced metrics

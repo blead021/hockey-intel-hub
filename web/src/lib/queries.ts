@@ -98,7 +98,7 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
     left join stats s on s.player_id = p.id
     left join lateral (
       select cap_hit, end_season, expiry_status, clause from contracts
-      where player_id = p.id and ${season} between start_season and end_season
+      where player_id = p.id and status = 'active' and ${season} between start_season and end_season
       order by start_season desc limit 1) c on true
     order by pts desc, g desc, toi_sec desc, name`;
 }
@@ -147,7 +147,7 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
     left join stats s on s.player_id = p.id
     left join lateral (
       select cap_hit, end_season, expiry_status, clause from contracts
-      where player_id = p.id and ${season} between start_season and end_season
+      where player_id = p.id and status = 'active' and ${season} between start_season and end_season
       order by start_season desc limit 1) c on true
     order by gp desc, name`;
 }
@@ -291,7 +291,7 @@ export async function getCurrentContract(sql: Sql, playerId: number, season: num
   const [row] = await sql<Contract[]>`
     select cap_hit::float8 as cap_hit, aav::float8 as aav, start_season, end_season, expiry_status, clause,
            no_trade_list_size, retained_pct::float8 as retained_pct
-    from contracts where player_id = ${playerId} and ${season} between start_season and end_season
+    from contracts where player_id = ${playerId} and status = 'active' and ${season} between start_season and end_season
     order by start_season desc limit 1`;
   return row;
 }
@@ -319,4 +319,29 @@ export async function getLatestEdge(sql: Sql, playerId: number): Promise<Edge | 
            dz_time_pct::float8 as dz_time_pct, oz_time_pctile::float8 as oz_time_pctile
     from edge_player_stats where player_id = ${playerId} order by season_id desc limit 1`;
   return row;
+}
+
+export type ContractChangeEvent = {
+  id: number;
+  created_at: string;
+  player_name: string;
+  player_id: number | null;
+  event_type: string;
+  event_status: string;
+  outcome: string;
+  outcome_note: string | null;
+  source_urls: string[];
+  changes: { field: string; old: string | null; new: string | null }[];
+};
+
+// What the daily contract news job did, newest first, with sources.
+export async function getContractEvents(sql: Sql, days = 30) {
+  return sql<ContractChangeEvent[]>`
+    select e.id, to_char(e.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at, e.player_name,
+           e.player_id, e.event_type, e.event_status, e.outcome, e.outcome_note, e.source_urls,
+           coalesce(json_agg(json_build_object('field', c.field, 'old', c.old_value, 'new', c.new_value)
+                             order by c.id) filter (where c.id is not null), '[]') as changes
+    from contract_events e left join contract_changes c on c.event_id = e.id
+    where e.created_at > now() - make_interval(days => ${days})
+    group by e.id order by e.created_at desc, e.id desc`;
 }

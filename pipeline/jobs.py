@@ -18,6 +18,7 @@ def job_run(job: str) -> Iterator[Counter]:
     counts: Counter = Counter()
     with connect(autocommit=True) as log:
         run_id = log.execute("insert into job_runs (job) values (%s) returning id", (job,)).fetchone()[0]
+        counts.run_id = run_id  # lets a job link its own records to this run
         try:
             yield counts
         except BaseException:
