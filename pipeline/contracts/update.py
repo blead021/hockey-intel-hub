@@ -23,11 +23,11 @@ from pipeline.sources import require_enabled
 MAX_ITEMS_PER_RUN = 200
 
 
-def pending_news(conn, limit: int = MAX_ITEMS_PER_RUN) -> list[dict]:
+def pending_news(conn, limit: int = MAX_ITEMS_PER_RUN, backfill: bool = False) -> list[dict]:
     cur = conn.execute(
         """select id, title, outlet, url, published_at from contract_news
-           where status in ('pending', 'failed') order by published_at nulls last, id limit %s""",
-        (limit,),
+           where status in ('pending', 'failed') and (query like 'backfill%%') = %s order by published_at nulls last, id limit %s""",
+        (backfill, limit),
     )
     cols = [d.name for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -42,6 +42,8 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description="Keep contracts current from news")
     parser.add_argument("--dry-run", action="store_true", help="print what Claude extracts; change no contracts")
+    parser.add_argument("--backfill", action="store_true",
+                        help="process released backfill headlines: only add missing contracts, never change one")
     parser.add_argument("--max", type=int, default=MAX_ITEMS_PER_RUN, help="most headlines to process this run")
     args = parser.parse_args(argv)
 
@@ -52,8 +54,9 @@ def main(argv: list[str] | None = None) -> None:
             counts["waiting_for_starting_file"] = 1
             print("contract news: waiting for the starting contracts (python -m pipeline.ingest.contracts). Nothing done.")
             return
-        news.collect(conn, http, counts)
-        items = pending_news(conn, args.max)
+        if not args.backfill:
+            news.collect(conn, http, counts)
+        items = pending_news(conn, args.max, args.backfill)
         counts["news_to_read"] = len(items)
         if not items:
             print(f"contract news: nothing new. {dict(counts)}")
@@ -64,7 +67,7 @@ def main(argv: list[str] | None = None) -> None:
         claude = anthropic.Anthropic()
         team_codes = dict(conn.execute("select abbrev, name from teams where active").fetchall())
         teams = dict(conn.execute("select abbrev, id from teams where active").fetchall())
-        applier = Applier(conn, getattr(counts, "run_id", None), MODEL, teams)
+        applier = Applier(conn, getattr(counts, "run_id", None), MODEL, teams, create_only=args.backfill)
         outcomes: Counter = Counter()
         errors: list[str] = []
 

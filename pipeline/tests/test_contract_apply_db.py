@@ -123,3 +123,23 @@ def test_prospect_entry_level_deal_is_saved_by_name_with_unknowns(conn, setup):
 def test_unknown_team_is_skipped(conn, setup):
     applier, _, name, *_ = setup
     assert applier.apply(_t(type="signing", player_name=name, team="XYZ"), NEWS) == "skipped_unmatched"
+
+
+def test_backfill_only_adds_missing_contracts_still_in_force(conn, setup):
+    from pipeline.contracts.apply import Applier
+
+    applier, player_id, name, team, other, teams = setup
+    backfill = Applier(conn, None, "test", teams, create_only=True)
+    before = _contracts(conn, player_id)
+    # A player with a contract on file is never changed, even by a signing or a trade.
+    assert backfill.apply(_t(type="extension", player_name=name, team=team, cap_hit=9_000_000, years=3), NEWS) == "skipped_on_file"
+    assert backfill.apply(_t(type="trade", player_name=name, team=other, from_team=team), NEWS) == "skipped_type"
+    assert _contracts(conn, player_id) == before
+    # A depth player with no contract: an expired deal is skipped, one still in force is added.
+    old = _t(type="signing", player_name="Backfill Testplayer", team=team, cap_hit=775_000,
+             start_season="2022-23", end_season="2023-24")
+    assert backfill.apply(old, NEWS) == "skipped_expired"
+    new = _t(type="signing", player_name="Backfill Testplayer", team=team, cap_hit=800_000,
+             start_season="2025-26", end_season="2027-28")
+    assert backfill.apply(new, NEWS) == "applied"
+    assert backfill.apply(new, NEWS) == "skipped_on_file"

@@ -108,8 +108,11 @@ def _as_text(value) -> str | None:
 
 
 class Applier:
-    def __init__(self, conn, run_id: int | None, model: str, teams: dict[str, int]):
+    def __init__(self, conn, run_id: int | None, model: str, teams: dict[str, int], create_only: bool = False):
+        """create_only (the one-time backfill from old news): only add contracts that are still in force for
+        players with none on file; never change or end a contract already on file."""
         self.conn, self.run_id, self.model, self.teams = conn, run_id, model, teams
+        self.create_only = create_only
 
     def apply(self, t: dict, news: list[dict]) -> str:
         """Applies one transaction inside a transaction block. Returns its outcome."""
@@ -138,6 +141,11 @@ class Applier:
     def _decide(self, t: dict, player_id: int | None, team_id: int | None):
         if t["status"] != "completed":
             return "skipped_unconfirmed", f"news says {t['status']}, not completed", []
+        if self.create_only:
+            if t["type"] not in CONTRACT_TYPES:
+                return "skipped_type", "backfill only adds contracts", []
+            if self._on_file(t["player_name"], player_id):
+                return "skipped_on_file", "backfill never changes a contract already on file", []
         if t["type"] in CONTRACT_TYPES:
             if team_id is None:
                 return "skipped_unmatched", f"unknown team {t.get('team')!r}", []
@@ -151,6 +159,15 @@ class Applier:
         if t["type"] in ENDINGS:
             return self._end(t, player_id)
         return "skipped_type", f"{t['type']} does not change a contract", []
+
+    def _on_file(self, name: str, player_id: int | None) -> bool:
+        if player_id:
+            return bool(self._current(player_id))
+        return self.conn.execute(
+            """select exists (select 1 from contracts where player_id is null and lower(player_name) = lower(%s)
+                   and status = 'active' and (end_season is null or end_season >= %s))""",
+            (name, current_season()),
+        ).fetchone()[0]
 
     def _current(self, player_id: int) -> list[dict]:
         """Active contracts that are not over yet (or whose end is unknown), latest first."""
@@ -185,6 +202,8 @@ class Applier:
         plan = plan_contract_terms(t, current_end if t["type"] == "extension" else None)
         values = {**plan.values, "team_id": team_id}
         note = "; ".join(plan.derived) or None
+        if self.create_only and (values.get("end_season") is None or values["end_season"] < season):
+            return "skipped_expired", "backfill: contract over or its end season unknown", []
 
         start = values.get("start_season")
         same = None

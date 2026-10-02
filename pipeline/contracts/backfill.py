@@ -77,11 +77,69 @@ def search(conn, http, counts) -> None:
 
 
 NEWEST = """select id from (
-    select id, row_number() over (partition by query order by published_at desc nulls last, id) as n
-    from contract_news where status = 'backfill') r where n <= %s"""
+    select id, query, row_number() over (partition by query order by published_at desc nulls last, id) as n
+    from contract_news where status = 'backfill') r where n <= %s or query like 'backfill team %%'"""
+
+
+TEAM_QUERIES = [
+    '"{name}" (sign OR signs OR signed) ("two-way" OR "entry-level" OR "one-year" OR "two-year")',
+    '"{name}" ("agree to terms" OR "agree to a" OR "re-sign" OR "re-signs") contract',
+]
+# Signings older than this have ended (two-way and entry-level deals run at most 3 years).
+TEAM_SINCE = datetime(2023, 6, 1, tzinfo=UTC)
+
+
+def search_teams(conn, http, abbrevs: list[str], counts) -> None:
+    """For teams short of contracts: their signing news over the last three years, so depth players on
+    two-way deals who are on no NHL list can be found. Headlines go in as 'backfill', as above."""
+    for abbrev, name in conn.execute(
+        "select abbrev, name from teams where active and abbrev = any(%s) order by abbrev", (abbrevs,)
+    ).fetchall():
+        keep: dict[str, object] = {}
+        for template in TEAM_QUERIES:
+            query = template.format(name=name)
+            response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+            archive.save("contract_backfill", f"team-{abbrev}", {"query": query, "xml": response.text})
+            for i in parse_results(response.content, f"backfill team {abbrev}"):
+                if is_candidate(i) and i.published_at and i.published_at >= TEAM_SINCE:
+                    keep.setdefault(i.id, i)
+            time.sleep(PAUSE_SECONDS)
+        with conn.transaction(), conn.cursor() as cur:
+            cur.executemany(
+                """insert into contract_news (id, title, outlet, url, published_at, query, status)
+                   values (%s, %s, %s, %s, %s, %s, 'backfill') on conflict (id) do nothing""",
+                [(i.id, i.title, i.outlet, i.url, i.published_at, i.query) for i in keep.values()],
+            )
+        counts[f"headlines_{abbrev}"] = len(keep)
+
+
+def prune(conn) -> None:
+    """Free cleanup before estimating: drop player-by-player headlines (the verified file covers those
+    players) and team headlines that name a player who already has a contract."""
+    conn.execute(
+        """update contract_news set status = 'skipped', processed_at = now(),
+               error = 'backfill: player now covered by the contracts file'
+           where status = 'backfill' and query not like 'backfill team %%'"""
+    )
+    on_file = {
+        normalize(n) for (n,) in conn.execute(
+            """select coalesce(p.first_name || ' ' || p.last_name, c.player_name) from contracts c
+               left join players p on p.id = c.player_id where c.status = 'active'"""
+        )
+    }
+    drop = [
+        news_id for news_id, title in conn.execute("select id, title from contract_news where status = 'backfill'")
+        if any(f" {name} " in f" {normalize(title)} " for name in on_file)
+    ]
+    conn.execute(
+        """update contract_news set status = 'skipped', processed_at = now(),
+               error = 'backfill: names a player whose contract is on file' where id = any(%s)""",
+        (drop,),
+    )
 
 
 def estimate(conn) -> None:
+    prune(conn)
     waiting = conn.execute(f"select count(*) from ({NEWEST}) x", (NEWEST_PER_PLAYER,)).fetchone()[0]
     searched, without = conn.execute(
         "select count(*), count(*) filter (where kept = 0) from contract_backfill_searches"
@@ -101,13 +159,14 @@ def release(conn) -> None:
                error = 'older backfill headline; the newest ones cover the current contract'
            where status = 'backfill'"""
     )
-    print(f"{n} headlines handed to the contracts job (python -m pipeline.contracts.update --max {n}).")
+    print(f"{n} headlines handed to the contracts job (python -m pipeline.contracts.update --backfill --max {n}).")
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Backfill contracts for players missing from the starting file")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--search", action="store_true")
+    mode.add_argument("--teams", help="comma-separated team codes short of contracts, for example PHI,COL")
     mode.add_argument("--estimate", action="store_true")
     mode.add_argument("--release", action="store_true")
     args = parser.parse_args(argv)
@@ -115,6 +174,10 @@ def main(argv: list[str] | None = None) -> None:
         with job_run("contract_backfill_search") as counts, connect(autocommit=True) as conn, client() as http:
             search(conn, http, counts)
             print(f"backfill search ok: {dict(counts)} at {datetime.now(UTC):%H:%M} UTC")
+    if args.teams:
+        with job_run("contract_backfill_teams") as counts, connect(autocommit=True) as conn, client() as http:
+            search_teams(conn, http, [t.strip().upper() for t in args.teams.split(",")], counts)
+            print(f"team search ok: {dict(counts)}")
     with connect(autocommit=True) as conn:
         if args.release:
             release(conn)

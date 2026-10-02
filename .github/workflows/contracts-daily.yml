@@ -14,6 +14,10 @@ on:
       max:
         description: "Most headlines to process (blank = 200)"
         required: false
+      backfill:
+        description: "Process released backfill headlines (only adds missing contracts)"
+        type: boolean
+        default: false
 
 concurrency:
   group: contracts
@@ -38,4 +42,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m pipeline.contracts.update ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.max && format('--max {0}', inputs.max) || '' }}
+      - run: python -m pipeline.contracts.update ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.backfill && '--backfill' || '' }} ${{ inputs.max && format('--max {0}', inputs.max) || '' }}
