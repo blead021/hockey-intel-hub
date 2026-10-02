@@ -232,6 +232,78 @@ class Shooting:
 
 
 @dataclass
+class Style:
+    team_id: int
+    oz_hits: int = 0
+    oz_takeaways: int = 0
+    rush_onice_5v5: int = 0
+    shots_slot: int = 0
+    shots_mid: int = 0
+    shots_perimeter: int = 0
+
+
+SLOT_DISTANCE, SLOT_WIDTH, MID_DISTANCE = 25, 20, 45  # feet (CLAUDE.md section 6, Play style)
+
+
+def shot_location(distance: float, y_abs: float) -> str:
+    if distance <= SLOT_DISTANCE and y_abs <= SLOT_WIDTH:
+        return "slot"
+    return "mid" if distance <= MID_DISTANCE else "perimeter"
+
+
+def style_counts(pbp: dict, shifts: list[Shift], rows, team_of: dict[int, int], home: int) -> dict[int, Style]:
+    """Per-player counts for the Play style traits: offensive-zone hits and takeaways, 5v5 rush attempts
+    while on the ice (the zone-entry estimate), and his own shot locations."""
+    out: dict[int, Style] = {}
+
+    def get(pid: int) -> Style | None:
+        team = team_of.get(pid)
+        if team is None:
+            return None
+        return out.setdefault(pid, Style(team))
+
+    for play in pbp.get("plays", []):
+        kind = play.get("typeDescKey")
+        details = play.get("details") or {}
+        if kind not in ("hit", "takeaway"):
+            continue
+        pid = details.get("hittingPlayerId") if kind == "hit" else details.get("playerId")
+        st = get(pid) if pid else None
+        x = details.get("xCoord")
+        if st is None or x is None or abs(x) <= BLUE_LINE_X:
+            continue
+        # Offensive zone for his team: the end his team attacks (home attacks away from the side it defends).
+        defends = play.get("homeTeamDefendingSide")
+        if defends not in ("left", "right"):
+            continue
+        home_attacks_right = defends == "left"
+        attacks_right = home_attacks_right if st.team_id == home else not home_attacks_right
+        if (x > 0) == attacks_right:
+            if kind == "hit":
+                st.oz_hits += 1
+            else:
+                st.oz_takeaways += 1
+
+    by_period: dict[int, list[Shift]] = defaultdict(list)
+    for sh in shifts:
+        by_period[sh.period].append(sh)
+    for r in rows:
+        if r.shooter_id:
+            st = get(r.shooter_id)
+            if st:
+                loc = shot_location(r.features["distance"], r.features["y_abs"])
+                setattr(st, f"shots_{loc}", getattr(st, f"shots_{loc}") + 1)
+        if r.situation == FIVE_ON_FIVE and r.features["rush"]:
+            period, t = r.features["period"], r.features["game_seconds"] - (r.features["period"] - 1) * 1200
+            for sh in by_period.get(period, []):
+                if sh.team_id == r.shooting_team and sh.start < t <= sh.end:
+                    st = get(sh.player_id)
+                    if st:
+                        st.rush_onice_5v5 += 1
+    return out
+
+
+@dataclass
 class GoalieXg:
     team_id: int
     shots_faced: int = 0
@@ -293,7 +365,7 @@ def add_special_teams_xg(play, situation, xg_by_event, team_of, home, away, shif
 
 
 def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, goalies: dict | None = None,
-          xg_version: str | None = None) -> None:
+          xg_version: str | None = None, styles: dict | None = None) -> None:
     def xg(value: float) -> float | None:
         return round(value, 3) if xg_version else None
 
@@ -301,7 +373,7 @@ def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, 
         return value if xg_version else None
 
     with conn.transaction():
-        for table in ("player_game_onice", "team_game_onice", "player_game_shooting", "goalie_game_xg"):
+        for table in ("player_game_onice", "team_game_onice", "player_game_shooting", "goalie_game_xg", "player_game_style"):
             conn.execute(f"delete from {table} where game_id = %s", (game_id,))
         with conn.cursor() as cur:
             cur.executemany(
@@ -328,6 +400,12 @@ def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, 
                            goals_5v5, ixg_5v5) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     [(pid, game_id, sh.team_id, sh.shots, sh.goals, round(sh.ixg, 3), sh.shots_5v5, sh.goals_5v5,
                       round(sh.ixg_5v5, 3)) for pid, sh in (shooters or {}).items()],
+                )
+                cur.executemany(
+                    """insert into player_game_style (player_id, game_id, team_id, oz_hits, oz_takeaways, rush_onice_5v5,
+                           shots_slot, shots_mid, shots_perimeter) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [(pid, game_id, st.team_id, st.oz_hits, st.oz_takeaways, st.rush_onice_5v5, st.shots_slot,
+                      st.shots_mid, st.shots_perimeter) for pid, st in (styles or {}).items()],
                 )
                 cur.executemany(
                     """insert into goalie_game_xg (player_id, game_id, team_id, shots_faced, goals_against, xga)
@@ -360,12 +438,16 @@ def run(conn, games: list[tuple[int, int]], counts) -> None:
                 xg_by_event = xg_score.score(model, rows) if model else {}
                 result = compute_game(pbp, shifts, xg_by_event)
                 shooters, goalies = shooting_and_goalies(rows, xg_by_event)
+                roster = {p["playerId"]: p for p in pbp.get("rosterSpots", [])}
+                skater_team = {pid: p["teamId"] for pid, p in roster.items() if p.get("positionCode") != "G"}
+                styles = style_counts(pbp, [s for s in parse_shifts(shifts) if s.player_id in skater_team],
+                                      rows, skater_team, pbp["homeTeam"]["id"])
                 if not result.players:
                     # No shift chart (the NHL is missing some): on-ice stats are impossible, but individual
                     # shooting and goalie xG do not need shifts, so keep those.
                     counts["games_without_shifts"] += 1
                     result = GameResult()
-                store(conn, game_id, result, shooters, goalies, xg_version)
+                store(conn, game_id, result, shooters, goalies, xg_version, styles)
                 counts["games_computed"] += 1
                 counts["shots_without_shooter"] += result.shots_without_shooter
             except (archive.ArchiveUnavailable, psycopg.OperationalError):

@@ -148,3 +148,29 @@ def test_power_play_and_penalty_kill_xg():
     assert round(line(r, 11).pp_xgf, 2) == 0.3 and line(r, 11).sh_xgf == 0
     assert round(line(r, 21).sh_xga, 2) == 0.3 and line(r, 21).pp_xga == 0
     assert line(r, 11).xgf == 0  # not a 5v5 shot
+
+
+def test_style_counts_zone_events_rush_and_shot_locations():
+    from types import SimpleNamespace
+
+    from pipeline.metrics.onice import Shift, shot_location, style_counts
+
+    # Home defends the left end, so home attacks x > 0.
+    pbp = {"plays": [
+        {"typeDescKey": "hit", "homeTeamDefendingSide": "left", "details": {"hittingPlayerId": 11, "xCoord": 70}},   # home, OZ
+        {"typeDescKey": "hit", "homeTeamDefendingSide": "left", "details": {"hittingPlayerId": 21, "xCoord": 70}},   # away, its DZ
+        {"typeDescKey": "takeaway", "homeTeamDefendingSide": "left", "details": {"playerId": 21, "xCoord": -60}},    # away, OZ
+        {"typeDescKey": "takeaway", "homeTeamDefendingSide": "left", "details": {"playerId": 11, "xCoord": 10}},     # neutral
+    ]}
+    shifts = [Shift(11, HOME, 1, 0, 120), Shift(12, HOME, 1, 0, 120), Shift(21, AWAY, 1, 0, 120)]
+    row = lambda shooter, team, dist, y, rush, situation="1551", t=30: SimpleNamespace(
+        shooter_id=shooter, shooting_team=team, situation=situation,
+        features={"distance": dist, "y_abs": y, "rush": rush, "period": 1, "game_seconds": t})
+    rows = [row(11, HOME, 15, 5, 1), row(11, HOME, 35, 10, 0), row(12, HOME, 60, 30, 1, situation="1451")]
+    out = style_counts(pbp, shifts, rows, {11: HOME, 12: HOME, 21: AWAY}, HOME)
+    assert (out[11].oz_hits, out[11].oz_takeaways) == (1, 0)
+    assert (out[21].oz_hits, out[21].oz_takeaways) == (0, 1)
+    assert (out[11].shots_slot, out[11].shots_mid, out[12].shots_perimeter) == (1, 1, 1)
+    assert out[11].rush_onice_5v5 == 1 and out[12].rush_onice_5v5 == 1   # the 5-on-4 rush shot does not count
+    assert out[21].rush_onice_5v5 == 0
+    assert shot_location(25, 20) == "slot" and shot_location(26, 0) == "mid" and shot_location(46, 0) == "perimeter"

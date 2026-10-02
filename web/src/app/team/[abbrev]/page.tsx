@@ -1,18 +1,26 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { CardGrid, DataTable, PageTitle, SeasonPicker, SectionTitle, StatCard, Td, Th, Unavailable } from "@/components/ui";
+import { TeamSelect } from "@/components/team-select";
+import { SeasonPicker, StatCard, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
-import { faceoffPct, money, num, pct, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
+import { faceoffPct, money, num, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
 import {
   getCapCeiling,
   getEnabledSources,
+  getExpiring,
   getLoadedSeasons,
+  getPlayerSentiment,
+  getRetainedCharges,
   getRosterGoalies,
   getRosterSkaters,
   getTeam,
-  getTeamRecord,
-  getTeamXgfPct,
+  getTeamChatter,
+  getTeams,
+  getTeamSummary,
+  type PlayerSentiment,
+  type RetainedCharge,
+  type RosterGoalie,
   type RosterSkater,
 } from "@/lib/queries";
 import { currentSeason, parseSeason } from "@/lib/seasons";
@@ -20,6 +28,25 @@ import { currentSeason, parseSeason } from "@/lib/seasons";
 export async function generateMetadata({ params }: PageProps<"/team/[abbrev]">) {
   const { abbrev } = await params;
   return { title: `${abbrev.toUpperCase()} roster` };
+}
+
+const MAX_RETAINED = 3;
+
+function ordinal(n: number | null): string {
+  if (n == null) return "—";
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+function yearsLeft(endSeason: number | null, season: number): string {
+  if (!endSeason) return "—";
+  return String(Math.floor(endSeason / 10000) - Math.floor(season / 10000) + 1);
+}
+
+function TrendArrow({ value }: { value: number | null | undefined }) {
+  if (value == null || Math.abs(value) < 1) return null;
+  return value > 0 ? <span className="ml-1 text-positive">▲</span> : <span className="ml-1 text-negative">▼</span>;
 }
 
 export default async function TeamPage({ params, searchParams }: PageProps<"/team/[abbrev]">) {
@@ -31,181 +58,321 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
   const data = await withDb(async (sql) => {
     const team = await getTeam(sql, abbrev);
     if (!team) return null;
-    const seasons = await getLoadedSeasons(sql);
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [record, skaters, goalies, sources, ceiling, xgfPct] = await Promise.all([
-      getTeamRecord(sql, team.id, season),
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained] = await Promise.all([
+      getTeams(sql),
+      getLoadedSeasons(sql),
+      getTeamSummary(sql, team.id, season),
       getRosterSkaters(sql, team.id, season, isCurrent),
       getRosterGoalies(sql, team.id, season, isCurrent),
       getEnabledSources(sql),
       getCapCeiling(sql, season),
-      getTeamXgfPct(sql, team.id, season),
+      getExpiring(sql, team.id, season),
+      getTeamChatter(sql, team.id),
+      getRetainedCharges(sql, team.id, season),
     ]);
-    return { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling, xgfPct };
+    const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, sentiment };
   });
   if (!data) notFound();
-  const { team, seasons, season, isCurrent, record, skaters, goalies, sources, ceiling, xgfPct } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
   const defense = skaters.filter((s) => s.position === "D");
-  const capCommitted = [...skaters, ...goalies].reduce((sum, p) => sum + (p.cap_hit ?? 0), 0);
+  const capOf = (list: { cap_hit: number | null }[]) => list.reduce((sum, p) => sum + (Number(p.cap_hit) || 0), 0);
+  const retainedCap = retained.reduce((sum, r) => sum + r.charge, 0);
+  const capCommitted = capOf(skaters) + capOf(goalies) + retainedCap;
   const hasContracts = [...skaters, ...goalies].some((p) => p.cap_hit != null);
   const pickerSeasons = [...new Set([current, ...seasons])].sort((a, b) => b - a);
+  const record = summary?.gp ? `${summary.w}-${summary.l}-${summary.otl} · ${summary.points} PTS` : seasonLabel(season);
+  const pct1 = (v: number | null | undefined) => (v == null ? "—" : (v * 100).toFixed(1));
+  const cols = showContracts ? 17 : 13;
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8">
-      <PageTitle eyebrow={[team.conference, team.division].filter(Boolean).join(" · ")} title={team.name}>
-        <SeasonPicker seasons={pickerSeasons} current={season} hrefFor={(s) => `/team/${team.abbrev}?season=${s}`} />
-      </PageTitle>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-widest text-muted">
+            {team.division ? `${team.division} Division · ` : ""}
+            {record}
+          </p>
+          <h1 className="font-heading text-4xl font-bold uppercase leading-tight tracking-tight sm:text-5xl">{team.name} roster</h1>
+          <SeasonPicker seasons={pickerSeasons} current={season} hrefFor={(s) => `/team/${team.abbrev}?season=${s}`} />
+        </div>
+        <TeamSelect teams={teams.map((t) => ({ abbrev: t.abbrev, name: t.name }))} current={team.abbrev} season={season} />
+      </div>
 
-      <CardGrid>
-        <StatCard label="Record" value={`${record.w}-${record.l}-${record.otl}`} detail={`${record.gp} GP · ${seasonLabel(season)}`} />
-        <StatCard label="Goals for / against" value={`${record.gf}-${record.ga}`} detail={`${signed(record.gf - record.ga)} differential`} />
-        <StatCard label="Roster" value={skaters.length + goalies.length} detail={isCurrent ? "current roster" : "played this season"} />
-        {showContracts && (
-          <>
-            <StatCard label="Cap committed" value={hasContracts ? money(capCommitted) : "—"} detail={hasContracts ? undefined : "no contracts loaded yet"} />
-            <StatCard
-              label="Cap space"
-              value={hasContracts && ceiling ? money(ceiling - capCommitted) : "—"}
-              detail={ceiling ? `ceiling ${money(ceiling)}` : "ceiling not set for this season"}
-            />
-          </>
-        )}
-        <StatCard label="5v5 xGF%" value={pct(xgfPct)} detail="share of expected goals at 5v5" />
-      </CardGrid>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatCard label="Cap committed" value={hasContracts ? money(capCommitted) : "—"} detail={ceiling ? `of ${money(ceiling)} ceiling` : "ceiling not set"} />
+        <StatCard
+          label="Cap space"
+          value={hasContracts && ceiling ? money(ceiling - capCommitted) : "—"}
+          detail={`Retained slots used: ${retained.length} of ${MAX_RETAINED}`}
+        />
+        <StatCard label="Active roster" value={skaters.length + goalies.length} detail={isCurrent ? "on the current roster" : "played this season"} />
+        <StatCard label="5v5 xGF%" value={pct1(summary?.xgf_pct)} detail={summary?.xgf_rank ? `${ordinal(summary.xgf_rank)} in NHL` : undefined} />
+        <StatCard
+          label="PP% / PK%"
+          value={`${pct1(summary?.pp_pct)} / ${pct1(summary?.pk_pct)}`}
+          detail={summary?.pp_rank ? `PP ${ordinal(summary.pp_rank)} · PK ${ordinal(summary.pk_rank)}` : undefined}
+        />
+        <StatCard
+          label="Fan sentiment"
+          value={summary?.fan_score == null ? "—" : Math.round(summary.fan_score)}
+          detail={
+            summary?.fan_score == null ? "scores begin once sentiment scoring is on" : summary.fan_trend == null ? undefined : (
+              <span className={summary.fan_trend >= 0 ? "text-positive" : "text-negative"}>
+                {summary.fan_trend >= 0 ? "▲" : "▼"} {Math.abs(Math.round(summary.fan_trend))} in 14 days
+              </span>
+            )
+          }
+        />
+      </div>
 
-      <SkaterTable title="Forwards" rows={forwards} showContracts={showContracts} showFaceoffs />
-      <SkaterTable title="Defense" rows={defense} showContracts={showContracts} />
-
-      <SectionTitle>Goalies</SectionTitle>
-      {goalies.length === 0 ? (
-        <Unavailable>No goalies yet for this season.</Unavailable>
-      ) : (
-        <DataTable>
+      <div className="mt-6 overflow-x-auto rounded-lg border border-border bg-surface px-4 pb-4">
+        <table className="w-full min-w-max border-collapse text-sm">
           <thead>
-            <tr>
-              <Th left>Goalie</Th>
-              <Th>Age</Th>
-              <Th>GP</Th>
-              <Th>GS</Th>
-              <Th>W-L-OTL</Th>
-              <Th>SV%</Th>
-              <Th>GAA</Th>
-              <Th>SA</Th>
-              <Th>GSAx</Th>
-              {showContracts && <Th>Cap hit</Th>}
-              {showContracts && <Th>Expiry</Th>}
+            <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
+              <th className="sticky left-0 z-10 bg-surface py-3 pr-3 text-left">Player</th>
+              {["Pos", "Age", "GP", "G", "A", "P", "TOI", "FO%", "xGF%", "WAR"].map((h) => (
+                <th key={h} className="px-2 py-3 text-right">{h}</th>
+              ))}
+              {showContracts && ["Cap hit", "Yrs", "Expiry", "Clause"].map((h) => (
+                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}>{h}</th>
+              ))}
+              <th className="px-2 py-3 text-right">Fans</th>
+              <th className="py-3 pl-2 text-right">Chatter</th>
             </tr>
           </thead>
           <tbody>
-            {goalies.map((g) => (
-              <tr key={g.id}>
-                <Td left>
-                  <PlayerLink id={g.id} name={g.name} number={g.number} />
-                </Td>
-                <Td>{num(g.age)}</Td>
-                <Td>{g.gp}</Td>
-                <Td>{g.gs}</Td>
-                <Td>{`${g.w}-${g.l}-${g.otl}`}</Td>
-                <Td>{svPct(g.saves, g.shots_against)}</Td>
-                <Td>{g.toi_sec ? num((g.ga * 3600) / g.toi_sec, 2) : "—"}</Td>
-                <Td>{g.shots_against}</Td>
-                <Td>{g.gsax == null ? "—" : signed(Math.round(g.gsax * 10) / 10)}</Td>
-                {showContracts && <Td>{money(g.cap_hit)}</Td>}
-                {showContracts && <Td>{expiry(g.end_season, g.expiry_status)}</Td>}
-              </tr>
-            ))}
+            <GroupHeader title="Forwards" count={forwards.length} total={showContracts ? capOf(forwards) : null} cols={cols} />
+            {forwards.map((p) => <SkaterRow key={p.id} p={p} s={sentiment.get(p.id)} season={season} showContracts={showContracts} />)}
+            <GroupHeader title="Defense" count={defense.length} total={showContracts ? capOf(defense) : null} cols={cols} />
+            {defense.map((p) => <SkaterRow key={p.id} p={p} s={sentiment.get(p.id)} season={season} showContracts={showContracts} />)}
           </tbody>
-        </DataTable>
-      )}
-      {!showContracts && (
-        <p className="mt-6 text-sm text-muted">Contract data is unavailable right now.</p>
-      )}
+        </table>
+
+        <h2 className="mt-6 font-heading text-2xl font-semibold uppercase tracking-tight">
+          Goalies <span className="font-sans text-sm font-normal normal-case tracking-normal text-muted">{goalies.length} {isCurrent ? "on roster" : "played"}</span>
+        </h2>
+        {goalies.length === 0 ? (
+          <Unavailable>No goalies yet for this season.</Unavailable>
+        ) : (
+          <table className="mt-2 w-full min-w-max border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
+                <th className="sticky left-0 z-10 bg-surface py-3 pr-3 text-left">Player</th>
+                {["Age", "GP", "SV%", "GAA", "GSAx", "WAR"].map((h) => <th key={h} className="px-2 py-3 text-right">{h}</th>)}
+                {showContracts && ["Cap hit", "Yrs", "Expiry", "Clause"].map((h) => (
+                  <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}>{h}</th>
+                ))}
+                <th className="px-2 py-3 text-right">Fans</th>
+                <th className="py-3 pl-2 text-right">Chatter</th>
+              </tr>
+            </thead>
+            <tbody>
+              {goalies.map((g) => <GoalieRow key={g.id} g={g} s={sentiment.get(g.id)} season={season} showContracts={showContracts} />)}
+            </tbody>
+          </table>
+        )}
+        <p className="mt-3 text-xs text-muted">
+          FO% shown for centers. 5v5 xGF% from our expected goals model. WAR arrives with the trade tools.
+          Fans = fan sentiment 0-100 with 14-day trend. Chatter = trade mentions in the last 7 days.
+        </p>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        {showContracts && <CapByPosition forwards={capOf(forwards)} defense={capOf(defense)} goalies={capOf(goalies)} retained={retained} />}
+        {showContracts && <Expiring rows={expiring} />}
+        <MostChatter rows={chatter} />
+      </div>
     </main>
   );
 }
 
-function PlayerLink({ id, name, number }: { id: number; name: string; number: number | null }) {
+function GroupHeader({ title, count, total, cols }: { title: string; count: number; total: number | null; cols: number }) {
   return (
-    <Link href={`/player/${id}`} className="font-medium hover:underline">
-      {number != null && <span className="mr-2 inline-block w-6 font-mono text-xs text-muted">{number}</span>}
-      {name}
-    </Link>
+    <tr>
+      <td colSpan={cols} className="border-b border-border pb-2 pt-5">
+        <span className="font-heading text-xl font-semibold uppercase">{title}</span>
+        <span className="ml-2 text-xs text-muted">
+          {count} players{total ? ` · ${money(total)}` : ""}
+        </span>
+      </td>
+    </tr>
   );
 }
 
-function expiry(endSeason: number | null, status: string | null): string {
-  if (!endSeason) return "—";
-  return `${Math.floor(endSeason / 10000) + 1}${status ? ` ${status}` : ""}`;
+function FansCell({ s }: { s: PlayerSentiment | undefined }) {
+  const score = s?.fan_score;
+  return (
+    <td className="px-2 py-2 text-right font-mono">
+      {score == null ? "—" : (
+        <span className={score >= 65 ? "text-positive" : score < 50 ? "text-negative" : ""}>
+          {Math.round(score)}
+          <TrendArrow value={s?.fan_trend} />
+        </span>
+      )}
+    </td>
+  );
 }
 
-function SkaterTable({
-  title,
-  rows,
-  showContracts,
-  showFaceoffs = false,
-}: {
-  title: string;
-  rows: RosterSkater[];
-  showContracts: boolean;
-  showFaceoffs?: boolean;
-}) {
+function ChatterCell({ s }: { s: PlayerSentiment | undefined }) {
+  return (
+    <td className="py-2 pl-2 text-right font-mono">
+      {s?.chatter_7d ? <span className={s.spike ? "text-negative" : ""}>{s.chatter_7d}{s.spike && " ▲"}</span> : "0"}
+    </td>
+  );
+}
+
+function ContractCells({ p, season }: { p: { cap_hit: number | null; end_season: number | null; expiry_status: string | null; clause: string | null }; season: number }) {
   return (
     <>
-      <SectionTitle note={showFaceoffs ? "FO% shown for players with 50+ draws" : undefined}>{title}</SectionTitle>
-      {rows.length === 0 ? (
-        <Unavailable>No players yet for this season.</Unavailable>
-      ) : (
-        <DataTable>
-          <thead>
-            <tr>
-              <Th left>Player</Th>
-              <Th>Pos</Th>
-              <Th>Age</Th>
-              <Th>GP</Th>
-              <Th>G</Th>
-              <Th>A</Th>
-              <Th>P</Th>
-              <Th>+/-</Th>
-              <Th>SOG</Th>
-              <Th>TOI/GP</Th>
-              <Th>PP TOI/GP</Th>
-              <Th>5v5 xGF%</Th>
-              {showFaceoffs && <Th>FO%</Th>}
-              {showContracts && <Th>Cap hit</Th>}
-              {showContracts && <Th>Expiry</Th>}
-              {showContracts && <Th>Clause</Th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p.id}>
-                <Td left>
-                  <PlayerLink id={p.id} name={p.name} number={p.number} />
-                </Td>
-                <Td>{p.position}</Td>
-                <Td>{num(p.age)}</Td>
-                <Td>{p.gp}</Td>
-                <Td>{p.g}</Td>
-                <Td>{p.a}</Td>
-                <Td>{p.pts}</Td>
-                <Td>{signed(p.plus_minus)}</Td>
-                <Td>{p.sog}</Td>
-                <Td>{p.gp ? toi(p.toi_sec / p.gp) : "—"}</Td>
-                <Td>{p.gp && p.pp_toi_sec != null ? toi(p.pp_toi_sec / p.gp) : "—"}</Td>
-                <Td>{pct(p.xgf_pct)}</Td>
-                {showFaceoffs && <Td>{p.position === "C" ? faceoffPct(p.fow, p.fol) : "—"}</Td>}
-                {showContracts && <Td>{money(p.cap_hit)}</Td>}
-                {showContracts && <Td>{expiry(p.end_season, p.expiry_status)}</Td>}
-                {showContracts && <Td>{p.clause && p.clause !== "none" ? p.clause : "—"}</Td>}
-              </tr>
-            ))}
-          </tbody>
-        </DataTable>
-      )}
+      <td className="px-2 py-2 text-right font-mono">{money(p.cap_hit)}</td>
+      <td className="px-2 py-2 text-right font-mono">{yearsLeft(p.end_season, season)}</td>
+      <td className="px-2 py-2 text-left font-mono">{p.expiry_status ?? "—"}</td>
+      <td className="px-2 py-2 text-left font-mono">{p.clause ? (p.clause === "none" ? "None" : p.clause) : "—"}</td>
     </>
+  );
+}
+
+function SkaterRow({ p, s, season, showContracts }: { p: RosterSkater; s: PlayerSentiment | undefined; season: number; showContracts: boolean }) {
+  return (
+    <tr className="border-b border-border-soft">
+      <td className="sticky left-0 z-10 bg-surface py-2 pr-3 text-left">
+        <Link href={`/player/${p.id}`} className="font-semibold hover:underline">{p.name}</Link>
+      </td>
+      <td className="px-2 py-2 text-right">{p.position}</td>
+      <td className="px-2 py-2 text-right font-mono">{num(p.age)}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.gp}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.g}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.a}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.pts}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.gp ? toi(p.toi_sec / p.gp) : "—"}</td>
+      <td className="px-2 py-2 text-right font-mono">{p.position === "C" ? faceoffPct(p.fow, p.fol).replace("%", "") : "—"}</td>
+      <td className={`px-2 py-2 text-right font-mono ${p.xgf_pct == null ? "" : p.xgf_pct >= 0.5 ? "text-positive" : "text-negative"}`}>
+        {p.xgf_pct == null ? "—" : (p.xgf_pct * 100).toFixed(1)}
+      </td>
+      <td className="px-2 py-2 text-right font-mono">—</td>
+      {showContracts && <ContractCells p={p} season={season} />}
+      <FansCell s={s} />
+      <ChatterCell s={s} />
+    </tr>
+  );
+}
+
+function GoalieRow({ g, s, season, showContracts }: { g: RosterGoalie; s: PlayerSentiment | undefined; season: number; showContracts: boolean }) {
+  return (
+    <tr className="border-b border-border-soft">
+      <td className="sticky left-0 z-10 bg-surface py-2 pr-3 text-left">
+        <Link href={`/player/${g.id}`} className="font-semibold hover:underline">{g.name}</Link>
+      </td>
+      <td className="px-2 py-2 text-right font-mono">{num(g.age)}</td>
+      <td className="px-2 py-2 text-right font-mono">{g.gp}</td>
+      <td className="px-2 py-2 text-right font-mono">{svPct(g.saves, g.shots_against)}</td>
+      <td className="px-2 py-2 text-right font-mono">{g.toi_sec ? num((g.ga * 3600) / g.toi_sec, 2) : "—"}</td>
+      <td className={`px-2 py-2 text-right font-mono ${g.gsax == null ? "" : g.gsax >= 0 ? "text-positive" : "text-negative"}`}>
+        {g.gsax == null ? "—" : signed(Math.round(g.gsax * 10) / 10)}
+      </td>
+      <td className="px-2 py-2 text-right font-mono">—</td>
+      {showContracts && <ContractCells p={g} season={season} />}
+      <FansCell s={s} />
+      <ChatterCell s={s} />
+    </tr>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-border bg-surface p-5">
+      <h2 className="mb-4 font-heading text-2xl font-semibold uppercase tracking-tight">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function CapByPosition({ forwards, defense, goalies, retained }: { forwards: number; defense: number; goalies: number; retained: RetainedCharge[] }) {
+  const retainedTotal = retained.reduce((sum, r) => sum + r.charge, 0);
+  const total = forwards + defense + goalies + retainedTotal;
+  if (!total) return <Panel title="Cap by position"><Unavailable>No contracts loaded for this roster.</Unavailable></Panel>;
+  const parts = [
+    { label: "Forwards", value: forwards, color: "bg-positive" },
+    { label: "Defense", value: defense, color: "bg-positive/60" },
+    { label: "Goalies", value: goalies, color: "bg-positive/30" },
+    ...(retainedTotal ? [{ label: "Retained on traded players", value: retainedTotal, color: "bg-negative/60" }] : []),
+  ];
+  return (
+    <Panel title="Cap by position">
+      <div className="flex h-3 overflow-hidden rounded-full" aria-hidden>
+        {parts.map((p) => <div key={p.label} className={p.color} style={{ width: `${(p.value / total) * 100}%` }} />)}
+      </div>
+      <ul className="mt-4 space-y-2 text-sm">
+        {parts.map((p) => (
+          <li key={p.label} className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-2"><span className={`inline-block h-3 w-3 rounded-sm ${p.color}`} />{p.label}</span>
+            <span className="font-mono">{money(p.value)} · {((p.value / total) * 100).toFixed(1)}%</span>
+          </li>
+        ))}
+      </ul>
+      {retained.length > 0 && (
+        <p className="mt-3 text-xs text-muted">
+          Retained: {retained.map((r) => `${r.name} (${r.team}, ${r.pct}%, ${money(r.charge)})`).join("; ")}.
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted">Buyouts and buried contracts are not tracked yet.</p>
+    </Panel>
+  );
+}
+
+function Expiring({ rows }: { rows: Awaited<ReturnType<typeof getExpiring>> }) {
+  const ufa = rows.filter((r) => r.expiry_status === "UFA").length;
+  const rfa = rows.filter((r) => r.expiry_status === "RFA").length;
+  const off = rows.reduce((sum, r) => sum + (r.cap_hit ?? 0), 0);
+  return (
+    <Panel title="Expiring this season">
+      <div className="mb-3 grid grid-cols-3 gap-2 text-sm">
+        <div><p className="text-xs text-muted">Pending UFAs</p><p className="font-mono text-xl">{ufa}</p></div>
+        <div><p className="text-xs text-muted">Pending RFAs</p><p className="font-mono text-xl">{rfa}</p></div>
+        <div><p className="text-xs text-muted">Cap coming off</p><p className="font-mono text-xl">{money(off)}</p></div>
+      </div>
+      {rows.length === 0 ? <p className="text-sm text-muted">No contracts end this season.</p> : (
+        <ul className="divide-y divide-border-soft text-sm">
+          {rows.slice(0, 6).map((r) => (
+            <li key={`${r.name}-${r.cap_hit}`} className="flex justify-between gap-2 py-2">
+              {r.player_id ? <Link href={`/player/${r.player_id}`} className="font-semibold hover:underline">{r.name}</Link> : <span className="font-semibold">{r.name}</span>}
+              <span className="font-mono text-xs text-muted">{r.expiry_status ?? "—"} · {money(r.cap_hit)}{r.age != null ? ` · age ${r.age}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function MostChatter({ rows }: { rows: Awaited<ReturnType<typeof getTeamChatter>> }) {
+  const top = Math.max(...rows.map((r) => r.chatter_7d), 1);
+  return (
+    <Panel title="Most trade chatter">
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted">No trade chatter yet. It appears once sentiment scoring is switched on.</p>
+      ) : (
+        <ul className="space-y-4">
+          {rows.map((r) => (
+            <li key={r.player_id}>
+              <div className="flex justify-between text-sm">
+                <Link href={`/player/${r.player_id}`} className="font-semibold hover:underline">{r.name}</Link>
+                <span className="font-mono text-negative">{r.chatter_7d} mentions</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-border-soft">
+                <div className="h-full bg-negative" style={{ width: `${(r.chatter_7d / top) * 100}%` }} />
+              </div>
+              {r.summary && <p className="mt-1 text-xs text-muted">{r.summary}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }

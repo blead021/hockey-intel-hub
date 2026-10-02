@@ -111,7 +111,9 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
     left join stats s on s.player_id = p.id
     left join onice oi on oi.player_id = p.id
     left join lateral (
-      select cap_hit, end_season, expiry_status, clause from contracts
+      -- Cap hit charged to this team: the full hit minus any share the previous team retained.
+      select (cap_hit * (1 - coalesce(retained_pct, 0) / 100))::float8 as cap_hit, end_season, expiry_status, clause
+      from contracts
       where player_id = p.id and status = 'active' and ${season} between start_season and end_season
       order by start_season desc limit 1) c on true
     order by pts desc, g desc, toi_sec desc, name`;
@@ -169,7 +171,9 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
     left join stats s on s.player_id = p.id
     left join gx on gx.player_id = p.id
     left join lateral (
-      select cap_hit, end_season, expiry_status, clause from contracts
+      -- Cap hit charged to this team: the full hit minus any share the previous team retained.
+      select (cap_hit * (1 - coalesce(retained_pct, 0) / 100))::float8 as cap_hit, end_season, expiry_status, clause
+      from contracts
       where player_id = p.id and status = 'active' and ${season} between start_season and end_season
       order by start_season desc limit 1) c on true
     order by gp desc, name`;
@@ -536,4 +540,226 @@ export async function getLatestOniceSeason(sql: Sql, playerId: number): Promise<
     from (select g.season_id, sum(o.toi_5v5_sec) as toi from player_game_onice o join games g on g.id = o.game_id
           where o.player_id = ${playerId} and g.game_type = 2 group by g.season_id) s`;
   return row?.season_id ?? undefined;
+}
+
+export type Trait = { key: string; pctile: number | null; estimate?: boolean };
+export type SimilarPlayer = { id: number; name: string; team: string | null };
+export type PlayStyle = {
+  season_id: number;
+  group: "C" | "W" | "D";
+  traits: Trait[];
+  shots: { slot: number; mid: number; perimeter: number; total: number };
+  similar: SimilarPlayer[];
+  writeup: { archetype: string | null; summary: string | null; tags: string[]; strengths: string[]; watch_outs: string[] } | null;
+};
+
+// Play style traits (CLAUDE.md section 6): percentiles versus the same position group (centers,
+// wingers, defensemen) among players with 100+ minutes in the season. Zone entries is an estimate.
+export async function getPlayStyle(sql: Sql, playerId: number, season: number): Promise<PlayStyle | undefined> {
+  const rows = await sql<
+    {
+      player_id: number; name: string; team: string | null; grp: "C" | "W" | "D";
+      p_shooting: number | null; p_playmaking: number | null; p_entries: number | null; p_forecheck: number | null;
+      p_physical: number | null; p_defense: number | null; p_puck: number | null; p_speed: number | null;
+      slot: number; mid: number; perimeter: number;
+    }[]
+  >`
+    with base as (
+      select s.player_id,
+             case when p.position = 'D' then 'D' when p.position = 'C' then 'C' else 'W' end as grp,
+             sum(s.toi_sec)::float8 as toi, count(*)::int as gp,
+             sum(s.a1)::float8 as a1, sum(s.hits + s.blocks)::float8 as physical,
+             sum(s.takeaways - s.giveaways)::float8 as puck
+      from game_skater_stats s join games g on g.id = s.game_id join players p on p.id = s.player_id
+      where g.season_id = ${season} and g.game_type = 2
+      group by s.player_id, grp
+      having sum(s.toi_sec) >= 6000),
+    shots as (
+      select sh.player_id, sum(sh.shots)::float8 as shots from player_game_shooting sh join games g on g.id = sh.game_id
+      where g.season_id = ${season} and g.game_type = 2 group by sh.player_id),
+    style as (
+      select st.player_id, sum(st.oz_hits + st.oz_takeaways)::float8 as forecheck, sum(st.rush_onice_5v5)::float8 as rush,
+             sum(st.shots_slot)::int as slot, sum(st.shots_mid)::int as mid, sum(st.shots_perimeter)::int as perimeter
+      from player_game_style st join games g on g.id = st.game_id
+      where g.season_id = ${season} and g.game_type = 2 group by st.player_id),
+    onice as (
+      select o.player_id, sum(o.toi_5v5_sec)::float8 as toi5, sum(o.xga)::float8 as xga,
+             sum(t.toi_5v5_sec - o.toi_5v5_sec)::float8 as off_toi5, sum(t.xga - o.xga)::float8 as off_xga
+      from player_game_onice o join team_game_onice t on t.team_id = o.team_id and t.game_id = o.game_id
+      join games g on g.id = o.game_id
+      where g.season_id = ${season} and g.game_type = 2 and o.xga is not null group by o.player_id),
+    edge as (
+      select player_id, top_speed_pctile::float8 as top_pct, bursts_20plus::float8 / nullif(games_played, 0) as bursts_pg
+      from edge_player_stats where season_id = ${season}),
+    rates as (
+      select b.player_id, b.grp,
+             coalesce(sh.shots, 0) * 3600 / b.toi as shooting,
+             b.a1 * 3600 / b.toi as playmaking,
+             st.rush * 3600 / nullif(oi.toi5, 0) as entries,
+             st.forecheck * 3600 / b.toi as forecheck,
+             b.physical * 3600 / b.toi as physical,
+             oi.xga * 3600 / nullif(oi.toi5, 0) - oi.off_xga * 3600 / nullif(oi.off_toi5, 0) as rel_xga60,
+             b.puck * 3600 / b.toi as puck,
+             e.top_pct, e.bursts_pg,
+             coalesce(st.slot, 0) as slot, coalesce(st.mid, 0) as mid, coalesce(st.perimeter, 0) as perimeter
+      from base b left join shots sh using (player_id) left join style st using (player_id)
+      left join onice oi using (player_id) left join edge e using (player_id)),
+    ranked as (
+      select r.*,
+        percent_rank() over (partition by grp order by shooting) as p_shooting,
+        percent_rank() over (partition by grp order by playmaking) as p_playmaking,
+        case when entries is not null then percent_rank() over (partition by grp, entries is null order by entries) end as p_entries,
+        case when forecheck is not null then percent_rank() over (partition by grp, forecheck is null order by forecheck) end as p_forecheck,
+        percent_rank() over (partition by grp order by physical) as p_physical,
+        case when rel_xga60 is not null then percent_rank() over (partition by grp, rel_xga60 is null order by rel_xga60 desc) end as p_defense,
+        percent_rank() over (partition by grp order by puck) as p_puck,
+        case when bursts_pg is not null then
+          (top_pct + percent_rank() over (partition by grp, bursts_pg is null order by bursts_pg)) / 2 end as p_speed
+      from rates r)
+    select k.player_id, p.first_name || ' ' || p.last_name as name, t.abbrev as team, k.grp,
+           p_shooting, p_playmaking, p_entries, p_forecheck, p_physical, p_defense, p_puck, p_speed,
+           slot, mid, perimeter
+    from ranked k join players p on p.id = k.player_id left join teams t on t.id = p.current_team_id`;
+
+  const me = rows.find((r) => r.player_id === playerId);
+  if (!me) return undefined;
+  const vector = (r: (typeof rows)[number]) => [
+    r.p_shooting, r.p_playmaking, r.p_entries, r.p_forecheck, r.p_physical, r.p_defense, r.p_puck, r.p_speed,
+  ];
+  const mine = vector(me);
+  const similar = rows
+    .filter((r) => r.grp === me.grp && r.player_id !== playerId)
+    .map((r) => {
+      const v = vector(r);
+      let sum = 0;
+      let n = 0;
+      v.forEach((x, i) => {
+        if (x != null && mine[i] != null) {
+          sum += (x - (mine[i] as number)) ** 2;
+          n += 1;
+        }
+      });
+      return { r, d: n ? Math.sqrt(sum / n) : Infinity };
+    })
+    .sort((a, b) => a.d - b.d)
+    .slice(0, 2)
+    .map(({ r }) => ({ id: r.player_id, name: r.name, team: r.team }));
+
+  const [w] = await sql<
+    { archetype: string | null; summary: string | null; tags: string[] | null; strengths: string[] | null; watch_outs: string[] | null }[]
+  >`select archetype, summary, tags, strengths, watch_outs from player_play_style where player_id = ${playerId} and season_id = ${season}`;
+
+  const total = me.slot + me.mid + me.perimeter;
+  return {
+    season_id: season,
+    group: me.grp,
+    traits: [
+      { key: "Shooting volume", pctile: me.p_shooting },
+      { key: "Playmaking", pctile: me.p_playmaking },
+      { key: "Zone entries", pctile: me.p_entries, estimate: true },
+      { key: "Forechecking", pctile: me.p_forecheck },
+      { key: "Physicality", pctile: me.p_physical },
+      { key: "Defensive impact", pctile: me.p_defense },
+      { key: "Puck management", pctile: me.p_puck },
+      { key: "Speed", pctile: me.p_speed },
+    ],
+    shots: { slot: me.slot, mid: me.mid, perimeter: me.perimeter, total },
+    similar,
+    writeup: w
+      ? { archetype: w.archetype, summary: w.summary, tags: w.tags ?? [], strengths: w.strengths ?? [], watch_outs: w.watch_outs ?? [] }
+      : null,
+  };
+}
+
+export type TeamSummary = {
+  gp: number | null; w: number | null; l: number | null; otl: number | null; points: number | null;
+  pp_pct: number | null; pk_pct: number | null; pp_rank: number | null; pk_rank: number | null;
+  xgf_pct: number | null; xgf_rank: number | null; fan_score: number | null; fan_trend: number | null;
+};
+
+// Team header and card numbers: official record, PP% and PK% with league ranks, 5v5 xGF% rank,
+// and fan sentiment (average of the latest fan scores of its players, with the 14-day change).
+export async function getTeamSummary(sql: Sql, teamId: number, season: number): Promise<TeamSummary> {
+  const [row] = await sql<TeamSummary[]>`
+    with stats as (
+      select team_id, gp::int, w::int, l::int, otl::int, points::int, pp_pct::float8, pk_pct::float8,
+             rank() over (order by pp_pct desc nulls last)::int as pp_rank,
+             rank() over (order by pk_pct desc nulls last)::int as pk_rank
+      from team_season_stats where season_id = ${season}),
+    xg as (
+      select team_id, xgf::float8 / nullif(xgf + xga, 0)::float8 as xgf_pct,
+             rank() over (order by xgf::float8 / nullif(xgf + xga, 0) desc nulls last)::int as xgf_rank
+      from team_season_onice where season_id = ${season} and game_type = 2),
+    fans as (
+      select avg(d.score_0_100)::float8 as fan_score,
+             avg(d.score_0_100 - old.score_0_100)::float8 as fan_trend
+      from sentiment_daily d
+      join players p on p.id = d.player_id and p.current_team_id = ${teamId}
+      left join sentiment_daily old on old.player_id = d.player_id and old.audience = 'fan' and old.date = d.date - 14
+      where d.audience = 'fan' and d.date = (select max(date) from sentiment_daily) and d.score_0_100 is not null)
+    select s.gp, s.w, s.l, s.otl, s.points, s.pp_pct, s.pk_pct, s.pp_rank, s.pk_rank, x.xgf_pct, x.xgf_rank,
+           f.fan_score, f.fan_trend
+    from (select ${teamId}::smallint as team_id) t
+    left join stats s on s.team_id = t.team_id
+    left join xg x on x.team_id = t.team_id
+    cross join fans f`;
+  return row;
+}
+
+export type PlayerSentiment = { player_id: number; fan_score: number | null; fan_trend: number | null; chatter_7d: number; spike: boolean };
+
+// Latest fan score and 14-day change, and trade chatter in the last 7 days, for a list of players.
+export async function getPlayerSentiment(sql: Sql, playerIds: number[]): Promise<Map<number, PlayerSentiment>> {
+  if (playerIds.length === 0) return new Map();
+  const rows = await sql<PlayerSentiment[]>`
+    with latest as (select max(date) as d from sentiment_daily)
+    select p.id as player_id, cur.score_0_100::float8 as fan_score,
+           (cur.score_0_100 - old.score_0_100)::float8 as fan_trend,
+           coalesce(tc.chatter_7d, 0)::int as chatter_7d, coalesce(tc.spike, false) as spike
+    from players p cross join latest
+    left join sentiment_daily cur on cur.player_id = p.id and cur.audience = 'fan' and cur.date = latest.d
+    left join sentiment_daily old on old.player_id = p.id and old.audience = 'fan' and old.date = latest.d - 14
+    left join trade_chatter tc on tc.player_id = p.id and tc.date = latest.d
+    where p.id in ${sql(playerIds)}`;
+  return new Map(rows.map((r) => [r.player_id, r]));
+}
+
+export type ExpiringContract = { player_id: number | null; name: string; expiry_status: string | null; cap_hit: number | null; age: number | null };
+
+// Contracts on this team that end this season, biggest first.
+export async function getExpiring(sql: Sql, teamId: number, season: number): Promise<ExpiringContract[]> {
+  return sql<ExpiringContract[]>`
+    select c.player_id, coalesce(p.first_name || ' ' || p.last_name, c.player_name) as name, c.expiry_status,
+           c.cap_hit::float8 as cap_hit, date_part('year', age(p.birth_date))::int as age
+    from contracts c left join players p on p.id = c.player_id
+    where c.team_id = ${teamId} and c.status = 'active' and c.end_season = ${season}
+    order by c.cap_hit desc nulls last`;
+}
+
+export type TradeChatterRow = { player_id: number; name: string; chatter_7d: number; summary: string | null };
+
+// Players on this team with the most trade mentions in the last 7 days, with the latest summary.
+export async function getTeamChatter(sql: Sql, teamId: number): Promise<TradeChatterRow[]> {
+  return sql<TradeChatterRow[]>`
+    with latest as (select max(date) as d from sentiment_daily)
+    select tc.player_id, p.first_name || ' ' || p.last_name as name, tc.chatter_7d::int as chatter_7d,
+           (select mp.summary from mention_players mp join mentions m on m.id = mp.mention_id
+             where mp.player_id = tc.player_id and mp.is_trade_related and mp.summary is not null
+             order by m.posted_at desc limit 1) as summary
+    from trade_chatter tc cross join latest join players p on p.id = tc.player_id
+    where tc.date = latest.d and p.current_team_id = ${teamId} and tc.chatter_7d > 0
+    order by tc.chatter_7d desc limit 4`;
+}
+
+export type RetainedCharge = { player_id: number | null; name: string; team: string; pct: number; charge: number };
+
+// Salary this team retained on players it traded away: each counts against its cap and uses a retention slot.
+export async function getRetainedCharges(sql: Sql, teamId: number, season: number): Promise<RetainedCharge[]> {
+  return sql<RetainedCharge[]>`
+    select c.player_id, coalesce(p.first_name || ' ' || p.last_name, c.player_name) as name, t.abbrev as team,
+           c.retained_pct::float8 as pct, (c.cap_hit * c.retained_pct / 100)::float8 as charge
+    from contracts c join teams t on t.id = c.team_id left join players p on p.id = c.player_id
+    where c.retained_by = ${teamId} and c.retained_pct > 0 and c.status = 'active'
+      and ${season} between c.start_season and c.end_season
+    order by charge desc`;
 }

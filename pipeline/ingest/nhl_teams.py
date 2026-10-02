@@ -79,6 +79,34 @@ def refresh(conn, http, counts) -> None:
     counts["teams"] = len(teams)
 
 
+def refresh_season_stats(conn, http, season: int, counts) -> None:
+    """Official team record, points, PP%, and PK% for one regular season."""
+    body = get_json(
+        http,
+        f"{STATS}/team/summary",
+        params={"isAggregate": "false", "isGame": "false", "limit": -1,
+                "cayenneExp": f"seasonId={season} and gameTypeId=2"},
+    )
+    rows = field(body, "data", "team summary")
+    ensure_teams(conn, http, {field(r, "teamId", "team summary row") for r in rows})
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany(
+            """insert into team_season_stats (team_id, season_id, gp, w, l, otl, points, goals_for, goals_against,
+                   pp_pct, pk_pct, updated_at)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+               on conflict (team_id, season_id) do update set gp = excluded.gp, w = excluded.w, l = excluded.l,
+                 otl = excluded.otl, points = excluded.points, goals_for = excluded.goals_for,
+                 goals_against = excluded.goals_against, pp_pct = excluded.pp_pct, pk_pct = excluded.pk_pct,
+                 updated_at = now()""",
+            [
+                (r["teamId"], season, r["gamesPlayed"], r["wins"], r["losses"], r.get("otLosses") or 0, r["points"],
+                 r["goalsFor"], r["goalsAgainst"], r.get("powerPlayPct"), r.get("penaltyKillPct"))
+                for r in rows
+            ],
+        )
+    counts["team_season_rows"] += len(rows)
+
+
 def ensure_teams(conn, http, team_ids: set[int]) -> int:
     """Adds any team ids we have not seen, as inactive teams, from the NHL's full team list."""
     known = {row[0] for row in conn.execute("select id from teams")}
@@ -97,10 +125,17 @@ def ensure_teams(conn, http, team_ids: set[int]) -> int:
     return len(missing)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Load NHL teams and their season totals")
+    parser.add_argument("--season", type=int, nargs="*", help="also load team season totals for these seasons")
+    args = parser.parse_args(argv)
     with job_run("nhl_teams") as counts, connect() as conn, client() as http:
         require_enabled(conn, "nhl_api")
         refresh(conn, http, counts)
+        for season in args.season or []:
+            refresh_season_stats(conn, http, season, counts)
     print(f"nhl_teams ok: {dict(counts)}")
 
 

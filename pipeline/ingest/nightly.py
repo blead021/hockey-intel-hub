@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> None:
         require_enabled(conn, "nhl_api")
         nhl_teams.refresh(conn, http, counts)
         counts["schedule_games"] = nhl_games.sync_schedule(conn, http, season)
+        nhl_teams.refresh_season_stats(conn, http, season, counts)
 
         # Finished games only, up to yesterday (today's games may still be in progress). The NHL corrects
         # boxscores for a few days after a game (starting goalies, assists), so recent games are reloaded too.

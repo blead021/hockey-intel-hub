@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { CardGrid, DataTable, PageTitle, SectionTitle, StatCard, Td, Th, Unavailable } from "@/components/ui";
+import { PlayStyleSection } from "@/components/play-style";
 import { withDb } from "@/lib/db";
 import { faceoffPct, heightFt, money, num, pct, season as seasonLabel, shortDate, signed, svPct, toi } from "@/lib/format";
 import {
@@ -9,6 +10,7 @@ import {
   getEnabledSources,
   getGameScoreBreakdown,
   getLatestOniceSeason,
+  getPlayStyle,
   getSkaterAdvanced,
   getGoalieSeasons,
   getLatestEdge,
@@ -47,7 +49,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
     const breakdownSeason = isGoalie
       ? (await sql<{ s: number | null }[]>`select max(g.season_id) as s from player_game_score gs join games g on g.id = gs.game_id where gs.player_id = ${id} and g.game_type = 2`)[0]?.s
       : oniceSeason;
-    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown] = await Promise.all([
+    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown, style] = await Promise.all([
       isGoalie ? Promise.resolve([]) : getSkaterSeasons(sql, id),
       isGoalie ? getGoalieSeasons(sql, id) : Promise.resolve([]),
       isGoalie ? Promise.resolve([]) : getSkaterLastGames(sql, id),
@@ -56,11 +58,12 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
       getEnabledSources(sql),
       oniceSeason ? getSkaterAdvanced(sql, id, oniceSeason) : Promise.resolve(undefined),
       breakdownSeason ? getGameScoreBreakdown(sql, id, breakdownSeason) : Promise.resolve(undefined),
+      !isGoalie && oniceSeason ? getPlayStyle(sql, id, oniceSeason) : Promise.resolve(undefined),
     ]);
-    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown };
+    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown, style };
   });
   if (!data) notFound();
-  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown } = data;
+  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown, style } = data;
 
   const bio = [
     player.position,
@@ -205,6 +208,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
           )}
 
           <AdvancedSection advanced={advanced} position={player.position} />
+          <PlayStyleSection style={style} />
           <GameScoreSection breakdown={breakdown} />
 
           {sources.has("nhl_edge") && <EdgeSection edge={edge} />}

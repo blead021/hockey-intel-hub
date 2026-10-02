@@ -246,12 +246,16 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
     1. The name as written (any alias), using the team to separate players who share a name.
     2. Otherwise the same surname on the same current team, if exactly one player fits. This covers
        formal first names (Zachary for Zach), accents, punctuation, and double surnames.
+    3. Two players with the same name on the same team (the two Elias Petterssons): an RFA contract goes
+       to the younger player and a UFA contract to the older one, since RFA status depends on age.
     """
     roster = conn.execute(
-        """select p.id, p.first_name, p.last_name, t.abbrev from players p join teams t on t.id = p.current_team_id"""
+        """select p.id, p.first_name, p.last_name, t.abbrev, p.birth_date
+           from players p join teams t on t.id = p.current_team_id"""
     ).fetchall()
+    born = {pid: birth for pid, _, _, _, birth in roster}
     by_full: dict[str, list] = {}
-    for pid, first, last, team in roster:
+    for pid, first, last, team, _ in roster:
         by_full.setdefault(normalize(f"{first} {last}"), []).append((pid, team))
     matches = {}
     for r in rows:
@@ -265,10 +269,13 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
             candidates = by_full.get(normalize(r.player), [])
         if len(candidates) > 1:
             candidates = [c for c in candidates if c[1] == r.team]
+        if len(candidates) > 1 and r.expiry_status in ("RFA", "UFA") and all(born.get(c[0]) for c in candidates):
+            ordered = sorted(candidates, key=lambda c: born[c[0]])   # oldest first
+            candidates = [ordered[-1] if r.expiry_status == "RFA" else ordered[0]]
         if len(candidates) != 1:
             wanted = normalize(r.player).split(" ")
             surname_fits = [
-                (pid, team) for pid, first, last, team in roster
+                (pid, team) for pid, first, last, team, _ in roster
                 if team == r.team and normalize(last).split(" ")[-1] in wanted[1:]
             ]
             candidates = surname_fits if len(surname_fits) == 1 else []
@@ -302,17 +309,24 @@ def main(argv: list[str] | None = None) -> int:
                 r = ContractRow(**{**r.__dict__, "retained_by": None})
             good.append(r)
         matches = match_players(conn, good)
-        # One contract per player per start season: keep the first row, report the rest.
-        seen: dict[tuple, int] = {}
-        unique = []
+        # One contract per player per start season. Keep the row for the player's current NHL team
+        # (otherwise the first row) and report the rest.
+        current_team = dict(conn.execute(
+            "select p.id, t.abbrev from players p join teams t on t.id = p.current_team_id").fetchall())
+        kept: dict[tuple, ContractRow] = {}
         for r in good:
-            key = (matches[r.line] or r.player.lower(), r.start_season)
-            if r.start_season is not None and key in seen:
-                result.problems.append((r.line, r.player, f"duplicate of row {seen[key]} (same player and start season); not loaded"))
+            key = (matches[r.line] or r.player.lower(), r.start_season) if r.start_season is not None else (r.line,)
+            if key not in kept:
+                kept[key] = r
                 continue
-            seen[key] = r.line
-            unique.append(r)
-        good = unique
+            first = kept[key]
+            pid = matches[r.line]
+            if pid and current_team.get(pid) == r.team and current_team.get(pid) != first.team:
+                kept[key], r, first = r, first, r
+            result.problems.append((r.line, r.player,
+                                    f"duplicate of row {first.line} (same player and start season); kept row {first.line} "
+                                    f"({first.team}), this row not loaded"))
+        good = sorted(kept.values(), key=lambda r: r.line)
         unmatched = [r for r in good if matches[r.line] is None]
         for r in unmatched:
             result.problems.append((r.line, r.player, f"no single NHL player named {r.player!r} on {r.team}; loaded without a player link"))
