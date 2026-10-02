@@ -123,6 +123,7 @@ Every source names players differently. Build this before any sentiment work.
 - `players` uses the NHL player ID as the primary key.
 - `player_aliases` maps every alternate name, nickname, and source-specific ID to that key (for example "Q. Hughes", "Quinn", "Huggy").
 - Sentiment matching must use context (team, subreddit, teammates mentioned) to separate players who share a surname. Low-confidence matches go to a `needs_review` state, not into the scores.
+- Implemented in `pipeline/sentiment/match.py` (2026-10-02): full names and nicknames match directly; a surname alone must be capitalized; shared surnames are settled by the feed's team, team names in the text, and teammates named in the same mention; surnames that are everyday words (Power, But, Stanley), someone's first name (Connor), or a team-name word (York) need team context. Claude scoring then confirms or rejects each candidate.
 
 ---
 
@@ -191,6 +192,7 @@ Estimate market AAV with a comparables model (nearest neighbors on age, position
 
 ### Sentiment
 - Claude scores each mention: target players, sentiment -1 to 1, is_trade_related, one-line summary. Batch requests, use a small fast model (for example `claude-haiku-4-5-20251001`), and cache by mention ID so nothing is scored twice.
+- Implemented in `pipeline/sentiment/score.py` with the Message Batches API (half price) on `claude-haiku-4-5`: 20 mentions per request, structured JSON output, summaries only for trade talk and in the model's own words. Each mention is sent once (`sentiment_batches`). Behind the `sentiment_scoring` data source, which stays off until Brian approves the cost (estimated $25-40 per month at about 6,000 matched mentions a day). Daily scores, trade chatter, and spikes come from `pipeline/sentiment/aggregate.py` (28-day window, 7-day half-life, at least 5 scored mentions to show a score) and the `trade_chatter` view.
 - Daily score per player per audience = 50 + 50 x (recency-weighted mean sentiment). Require a minimum mention count before displaying a score.
 - Trend = score change over 14 days.
 - Trade chatter = trade-related mentions in the last 7 days. Spike = 7-day count at least 2x the prior 4-week weekly average.
