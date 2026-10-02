@@ -20,9 +20,12 @@ Definitions (CLAUDE.md section 6), all at 5v5 with both goalies in net:
 """
 
 import argparse
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+
+import psycopg
 
 from pipeline import archive
 from pipeline.db import connect
@@ -37,6 +40,7 @@ FIVE_ON_FIVE = "1551"  # away goalie, away skaters, home skaters, home goalie
 BLUE_LINE_X = 25  # feet from center ice
 SHIFT_TYPE = 517  # shift rows; 505 rows mark goals
 WORKERS = 8
+CONNECTION_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -329,8 +333,8 @@ def run(conn, games: list[tuple[int, int]], counts) -> None:
                 store(conn, game_id, result, shooters, goalies, xg_version)
                 counts["games_computed"] += 1
                 counts["shots_without_shooter"] += result.shots_without_shooter
-            except archive.ArchiveUnavailable:
-                raise
+            except (archive.ArchiveUnavailable, psycopg.OperationalError):
+                raise  # setup or connection problem: stop, so the caller can reconnect and resume
             except Exception as exc:
                 counts["games_failed"] += 1
                 print(f"[onice] failed: {type(exc).__name__}: {exc}")
@@ -341,18 +345,38 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--season", type=int)
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args(argv)
-    with job_run("onice" + (f"_{args.season}" if args.season else "")) as counts, connect(autocommit=True) as conn:
-        games = conn.execute(
-            f"""select id, season_id from games where stats_loaded_at is not null
-                {"and season_id = %s" if args.season else ""}
-                {"" if args.reload else "and (onice_loaded_at is null or onice_loaded_at < stats_loaded_at or xg_version is distinct from (select version from xg_models where active))"}
-                order by game_date, id""",
-            (args.season,) if args.season else (),
-        ).fetchall()
-        counts["games_pending"] = len(games)
-        run(conn, games, counts)
-        if counts["games_failed"] > max(5, len(games) * 0.02):
-            raise RuntimeError(f"{counts['games_failed']} of {len(games)} games failed")
+    with job_run("onice" + (f"_{args.season}" if args.season else "")) as counts:
+        done_before_reload = None
+        for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+            try:
+                # A fresh connection each attempt. Games already stored are skipped (unless --reload, where the
+                # first attempt's start time marks what is already done), so a dropped connection resumes cleanly.
+                with connect(autocommit=True) as conn:
+                    if args.reload and done_before_reload is None:
+                        done_before_reload = conn.execute("select now()").fetchone()[0]
+                    pending = (
+                        "and (onice_loaded_at is null or onice_loaded_at < %s)" if args.reload else
+                        "and (onice_loaded_at is null or onice_loaded_at < stats_loaded_at "
+                        "or xg_version is distinct from (select version from xg_models where active))"
+                    )
+                    params = ([args.season] if args.season else []) + ([done_before_reload] if args.reload else [])
+                    games = conn.execute(
+                        f"""select id, season_id from games where stats_loaded_at is not null
+                            {"and season_id = %s" if args.season else ""} {pending}
+                            order by game_date, id""",
+                        params,
+                    ).fetchall()
+                    counts["games_pending"] = max(counts["games_pending"], len(games))
+                    run(conn, games, counts)
+                break
+            except psycopg.OperationalError as exc:
+                counts["reconnects"] += 1
+                print(f"[onice] connection lost ({exc}); reconnecting, attempt {attempt + 1} of {CONNECTION_ATTEMPTS}")
+                if attempt == CONNECTION_ATTEMPTS:
+                    raise
+                time.sleep(10 * attempt)
+        if counts["games_failed"] > max(5, counts["games_pending"] * 0.02):
+            raise RuntimeError(f"{counts['games_failed']} of {counts['games_pending']} games failed")
     print(f"onice ok: {dict(counts)}")
 
 
