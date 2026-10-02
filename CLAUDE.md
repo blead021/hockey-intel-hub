@@ -163,6 +163,7 @@ All on-ice metrics are 5v5 unless stated. Per-60 = stat / TOI minutes x 60.
 - Points = G + A1 + A2. Primary points = G + A1.
 - Faceoff % = FOW / (FOW + FOL). Show only for players with 50+ draws. Shown on Player Profile and Team Roster only.
 - Corsi (CF, CA): shot attempts (goals, shots on goal, missed, blocked) while on ice. CF% = CF / (CF + CA).
+- On-ice conventions (`pipeline/metrics/onice.py`, decided 2026-10-02): an event counts for players whose shift started before it and ended at or after it; an attempt belongs to the shooter's team from the game roster; a shot blocked by a teammate counts for the shooter's team (NHL.com credits it to the opponent, about 2-3 events a game); 5v5 ice time comes from shift charts (5 skaters and a goalie each); zone starts are shifts beginning at a 5v5 faceoff, zone from faceoff coordinates. Checked against the NHL's 5v5 SAT, USAT, and TOI: TOI within 2 seconds for 83% of player-games, season CF% within about 0.5 points. The NHL has no shift charts for 57 late 2024-25 games, so those games have no on-ice stats (individual and goalie xG are still stored).
 - Fenwick: Corsi excluding blocked shots.
 - Relative CF% and xGF%: player's on-ice % minus his team's % while he is off the ice.
 - xGF% = xGF / (xGF + xGA).
@@ -177,7 +178,11 @@ All on-ice metrics are 5v5 unless stated. Per-60 = stat / TOI minutes x 60.
 - Age = computed from birth date as of today. Aging index from historical production by position and age.
 
 ### xG model
-Gradient-boosted classifier on unblocked shots. Features: distance, angle, shot type, rebound (shot within 3 seconds of a prior shot), rush (shot within 4 seconds of an event in another zone), strength state, empty net, score state, prior event type. Train on at least three past seasons, validate on a held-out season, report log loss and calibration, and compare against MoneyPuck before switching.
+Gradient-boosted classifier on unblocked shots. Features: distance, angle, shot type, rebound (shot within 3 seconds of a prior shot), rush (shot within 4 seconds of an event in another zone), strength state, empty net, score state, prior event type. Train on at least three past seasons, validate on a held-out season, report log loss and calibration.
+- Decided 2026-10-02: we use our own model from the start, not MoneyPuck, to avoid its licensing question. Code: `pipeline/models/xg_features.py`, `xg_train.py`, `xg_score.py`. The active model is the row in `xg_models` with `active = true`; its file is in R2. Model `xg-2026-10-02`: trained on 2022-23 to 2024-25, tested on 2025-26: log loss 0.2185 (distance-and-angle baseline 0.2464), AUC 0.783.
+- Season adjustment: league xG differs from league goals by a few percent each season (between -3.6% and +4.8% in testing). Raw xG is stored; anything shown as "above expected" (goals above expected, GSAx) multiplies xG by the season's factor in the `xg_season_factor` view (league goals / league xG), so each season's totals balance. Percentages such as xGF% are unaffected.
+- High-danger chances: unblocked shots with xG of 0.15 or more.
+- After training a new model with `--activate`, the on-ice job recomputes every game whose `xg_version` differs.
 
 ### WAR
 If Evolving-Hockey is not licensed, build a simplified regularized model from on-ice xG impact, individual scoring, and penalties. Label it clearly as our estimate.
