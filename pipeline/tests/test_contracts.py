@@ -82,3 +82,11 @@ def test_strict_csv_reader_raises_with_line_numbers(tmp_path):
 def test_template_in_repo_has_the_right_columns():
     assert XLSX_PATH.exists()
     read_file(XLSX_PATH)  # raises if a column is missing
+
+
+def test_normalize_ignores_accents_punctuation_and_hyphens():
+    from pipeline.ingest.contracts import normalize
+
+    assert normalize("Arvid Söderblom") == "arvid soderblom"
+    assert normalize("J.T Compher") == normalize("J.T. Compher") == "jt compher"
+    assert normalize("Mats Zuccarello-Aasen") == "mats zuccarello aasen"

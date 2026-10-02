@@ -20,6 +20,7 @@ Required: player, team, cap_hit, start_season, end_season. Other columns may be 
 import argparse
 import csv
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -185,7 +186,8 @@ def _records(path: Path):
         from openpyxl import load_workbook
 
         wb = load_workbook(path, read_only=True, data_only=True)
-        ws = wb["contracts"] if "contracts" in wb.sheetnames else wb.worksheets[0]
+        named = [name for name in wb.sheetnames if name.strip().lower() == "contracts"]
+        ws = wb[named[0]] if named else wb.worksheets[0]
         rows = ws.iter_rows(values_only=True)
         header = [_text(h).lower() for h in next(rows, [])]
         _check_header(header, path)
@@ -231,8 +233,26 @@ def read_csv(path: Path = CSV_PATH) -> list[ContractRow]:
     return result.rows
 
 
+def normalize(name: str) -> str:
+    """Lowercase, no accents or punctuation: "J.T Compher" and "Söderblom" compare as "jt compher", "soderblom"."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", re.sub(r"[.'’]", "", plain).replace("-", " ")).strip().lower()
+
+
 def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
-    """Finds each contract's player by name, using the team to separate players who share a name."""
+    """Finds each contract's player.
+
+    1. The name as written (any alias), using the team to separate players who share a name.
+    2. Otherwise the same surname on the same current team, if exactly one player fits. This covers
+       formal first names (Zachary for Zach), accents, punctuation, and double surnames.
+    """
+    roster = conn.execute(
+        """select p.id, p.first_name, p.last_name, t.abbrev from players p join teams t on t.id = p.current_team_id"""
+    ).fetchall()
+    by_full: dict[str, list] = {}
+    for pid, first, last, team in roster:
+        by_full.setdefault(normalize(f"{first} {last}"), []).append((pid, team))
     matches = {}
     for r in rows:
         candidates = conn.execute(
@@ -241,8 +261,17 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
                where lower(a.alias) = lower(%s)""",
             (r.player,),
         ).fetchall()
+        if not candidates:
+            candidates = by_full.get(normalize(r.player), [])
         if len(candidates) > 1:
             candidates = [c for c in candidates if c[1] == r.team]
+        if len(candidates) != 1:
+            wanted = normalize(r.player).split(" ")
+            surname_fits = [
+                (pid, team) for pid, first, last, team in roster
+                if team == r.team and normalize(last).split(" ")[-1] in wanted[1:]
+            ]
+            candidates = surname_fits if len(surname_fits) == 1 else []
         matches[r.line] = candidates[0][0] if len(candidates) == 1 else None
     return matches
 
@@ -273,6 +302,17 @@ def main(argv: list[str] | None = None) -> int:
                 r = ContractRow(**{**r.__dict__, "retained_by": None})
             good.append(r)
         matches = match_players(conn, good)
+        # One contract per player per start season: keep the first row, report the rest.
+        seen: dict[tuple, int] = {}
+        unique = []
+        for r in good:
+            key = (matches[r.line] or r.player.lower(), r.start_season)
+            if r.start_season is not None and key in seen:
+                result.problems.append((r.line, r.player, f"duplicate of row {seen[key]} (same player and start season); not loaded"))
+                continue
+            seen[key] = r.line
+            unique.append(r)
+        good = unique
         unmatched = [r for r in good if matches[r.line] is None]
         for r in unmatched:
             result.problems.append((r.line, r.player, f"no single NHL player named {r.player!r} on {r.team}; loaded without a player link"))
