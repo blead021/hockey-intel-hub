@@ -367,7 +367,10 @@ def main(argv: list[str] | None = None) -> int:
             "select p.id, t.abbrev from players p join teams t on t.id = p.current_team_id").fetchall())
         kept: dict[tuple, ContractRow] = {}
         for r in good:
-            key = (matches[r.line] or r.player.lower(), r.start_season) if r.start_season is not None else (r.line,)
+            who = matches[r.line] or r.player.lower()
+            # The same player with the same end season and cap hit is the same contract, even if one row
+            # lacks the start season (a traded player listed under both teams).
+            key = (who, "end", r.end_season, r.cap_hit) if r.end_season is not None else (who, r.start_season, r.line)
             if key not in kept:
                 kept[key] = r
                 continue
@@ -375,8 +378,11 @@ def main(argv: list[str] | None = None) -> int:
             pid = matches[r.line]
             if pid and current_team.get(pid) == r.team and current_team.get(pid) != first.team:
                 kept[key], r, first = r, first, r
+            # Keep details only the dropped row has (start season, clause, and so on); the kept row's team stays.
+            merged = {k: (v if v is not None else getattr(r, k)) for k, v in first.__dict__.items()}
+            kept[key] = first = ContractRow(**merged)
             result.problems.append((r.line, r.player,
-                                    f"duplicate of row {first.line} (same player and start season); kept row {first.line} "
+                                    f"duplicate of row {first.line} (same player and contract); kept row {first.line} "
                                     f"({first.team}), this row not loaded"))
         good = sorted(kept.values(), key=lambda r: r.line)
         unmatched = [r for r in good if matches[r.line] is None]
