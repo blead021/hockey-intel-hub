@@ -21,7 +21,8 @@ async function connectionString(): Promise<string> {
 // across requests, and Hyperdrive makes opening a new one cheap. Use sql`...` tagged templates
 // so values are always sent as parameters, never pasted into the SQL text.
 export async function withDb<T>(fn: (sql: Sql) => Promise<T>): Promise<T> {
-  // fetch_types off: skips an extra round trip that Hyperdrive does not need.
+  // fetch_types off: skips an extra round trip that Hyperdrive does not need. It also means Postgres arrays
+  // come back as text like "{a,b}", so queries return lists with to_json(...) or json_agg(...).
   const sql = postgres(await connectionString(), { max: 1, fetch_types: false });
   try {
     return await fn(sql);

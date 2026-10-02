@@ -388,7 +388,7 @@ export type ContractChangeEvent = {
 export async function getContractEvents(sql: Sql, days = 30) {
   return sql<ContractChangeEvent[]>`
     select e.id, to_char(e.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') as created_at, e.player_name,
-           e.player_id, e.event_type, e.event_status, e.outcome, e.outcome_note, e.source_urls,
+           e.player_id, e.event_type, e.event_status, e.outcome, e.outcome_note, to_json(e.source_urls) as source_urls,
            coalesce(json_agg(json_build_object('field', c.field, 'old', c.old_value, 'new', c.new_value)
                              order by c.id) filter (where c.id is not null), '[]') as changes
     from contract_events e left join contract_changes c on c.event_id = e.id
@@ -606,7 +606,7 @@ export async function getPlayStyle(sql: Sql, playerId: number, season: number): 
 
   const [w] = await sql<
     { archetype: string | null; summary: string | null; tags: string[] | null; strengths: string[] | null; watch_outs: string[] | null }[]
-  >`select archetype, summary, tags, strengths, watch_outs from player_play_style where player_id = ${playerId} and season_id = ${season}`;
+  >`select archetype, summary, to_json(tags) as tags, to_json(strengths) as strengths, to_json(watch_outs) as watch_outs from player_play_style where player_id = ${playerId} and season_id = ${season}`;
 
   const total = me.slot + me.mid + me.perimeter;
   return {
