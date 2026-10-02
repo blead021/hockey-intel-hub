@@ -23,10 +23,17 @@ GOALIE_FIELDS = {
 }
 
 
-def nhl_summary(http, kind: str, season: int) -> dict[int, dict]:
+# Faceoffs come from play-by-play and ice-time splits from a separate report, so check them too.
+SKATER_DETAIL_FIELDS = {
+    "totalFaceoffWins": "fow", "totalFaceoffLosses": "fol", "timeOnIce": "toi_sec",
+    "evTimeOnIce": "ev_toi_sec", "ppTimeOnIce": "pp_toi_sec", "shTimeOnIce": "pk_toi_sec",
+}
+
+
+def nhl_summary(http, kind: str, season: int, report: str = "summary") -> dict[int, dict]:
     body = get_json(
         http,
-        f"{STATS}/{kind}/summary",
+        f"{STATS}/{kind}/{report}",
         params={"isAggregate": "true", "isGame": "false", "start": 0, "limit": -1,
                 "cayenneExp": f"seasonId={season} and gameTypeId=2"},
     )
@@ -86,10 +93,27 @@ def main(argv: list[str] | None = None) -> int:
                 (args.season,),
             )
         }
+        details = {
+            r[0]: dict(zip(SKATER_DETAIL_FIELDS.values(), r[1:]))
+            for r in conn.execute(
+                """select s.player_id, sum(fow)::int, sum(fol)::int, sum(toi_sec)::int, coalesce(sum(ev_toi_sec), 0)::int,
+                          coalesce(sum(pp_toi_sec), 0)::int, coalesce(sum(pk_toi_sec), 0)::int
+                   from game_skater_stats s join games g on g.id = s.game_id
+                   where g.season_id = %s and g.game_type = 2 group by s.player_id""",
+                (args.season,),
+            )
+        }
+        nhl_details = nhl_summary(http, "skater", args.season, "faceoffwins")
+        for player_id, row in nhl_summary(http, "skater", args.season, "timeonice").items():
+            nhl_details.setdefault(player_id, {}).update(row)
+
         failures = 0
-        for label, ours, kind, fields in (("Skaters", skaters, "skater", SKATER_FIELDS),
-                                          ("Goalies", goalies, "goalie", GOALIE_FIELDS)):
-            problems, counts = compare(ours, nhl_summary(http, kind, args.season), fields)
+        for label, ours, theirs, fields in (
+            ("Skaters", skaters, nhl_summary(http, "skater", args.season), SKATER_FIELDS),
+            ("Skater faceoffs and ice time", details, nhl_details, SKATER_DETAIL_FIELDS),
+            ("Goalies", goalies, nhl_summary(http, "goalie", args.season), GOALIE_FIELDS),
+        ):
+            problems, counts = compare(ours, theirs, fields)
             print(f"\n{label}: {dict(counts)}")
             for p in problems[:40]:
                 print(f"  {p}")

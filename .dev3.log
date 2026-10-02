@@ -19,3 +19,82 @@ Found a non-empty CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE varia
  GET /player/8478048 200 in 903ms (next.js: 34ms, application-code: 869ms)
  GET /player/9999999 404 in 681ms (next.js: 21ms, application-code: 660ms)
  GET /team/XYZ 404 in 586ms (next.js: 22ms, application-code: 564ms)
+ GET /team/NYR?season=20232024 200 in 2.7s (next.js: 21ms, application-code: 2.7s)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/team/NYR" notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <RootLayout>
+                        <html
+                          lang="en"
+                          className="barlow_condensed_ed4fb6a4-module__E1lK3q__variable ibm_plex_sans_38625ea8-module_..."
+-                         data-google-analytics-opt-out=""
+                        >
+                          <body
+-                           data-new-gr-c-s-check-loaded="14.1333.0"
+-                           data-gr-ext-installed=""
+                          >
+                  ...
+ 
+ GET /team/NYR?season=20232024 200 in 1212ms (next.js: 28ms, application-code: 1184ms)
+ GET /player/8476459 200 in 1579ms (next.js: 24ms, application-code: 1555ms)
+[browser] A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:
+
+- A server/client branch `if (typeof window !== 'undefined')`.
+- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.
+- Date formatting in a user's locale which doesn't match the server.
+- External changing data without sending a snapshot of it along with the HTML.
+- Invalid HTML tag nesting.
+
+It can also happen if the client has a browser extension installed which messes with the HTML before React loaded.
+
+https://react.dev/link/hydration-mismatch
+
+  ...
+    <HotReload globalError={[...]} webSocket={WebSocket} staticIndicatorState={{pathname:null, ...}}>
+      <AppDevOverlayErrorBoundary globalError={[...]}>
+        <ReplaySsrOnlyErrors>
+        <DevRootHTTPAccessFallbackBoundary>
+          <HTTPAccessFallbackBoundary notFound={<NotAllowedRootHTTPFallbackError>}>
+            <HTTPAccessFallbackErrorBoundary pathname="/player/84..." notFound={<NotAllowedRootHTTPFallbackError>} ...>
+              <RedirectBoundary>
+                <RedirectErrorBoundary router={{...}}>
+                  <Head>
+                  <__next_root_layout_boundary__>
+                    <SegmentViewNode type="layout" pagePath="layout.tsx">
+                      <SegmentTrieNode>
+                      <link>
+                      <script>
+                      <RootLayout>
+                        <html lang="en" className="barlow_con..." suppressHydrationWarning={true}>
+                          <body
+-                           data-new-gr-c-s-check-loaded="14.1333.0"
+-                           data-gr-ext-installed=""
+                          >
+                  ...
+ 
+ GET /player/8476459 200 in 1439ms (next.js: 88ms, application-code: 1351ms)
+ GET /player/8476459 200 in 1304ms (next.js: 32ms, application-code: 1271ms)
