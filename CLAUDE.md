@@ -180,7 +180,7 @@ All on-ice metrics are 5v5 unless stated. Per-60 = stat / TOI minutes x 60.
 ### xG model
 Gradient-boosted classifier on unblocked shots. Features: distance, angle, shot type, rebound (shot within 3 seconds of a prior shot), rush (shot within 4 seconds of an event in another zone), strength state, empty net, score state, prior event type. Train on at least three past seasons, validate on a held-out season, report log loss and calibration.
 - Decided 2026-10-02: we use our own model from the start, not MoneyPuck, to avoid its licensing question. Code: `pipeline/models/xg_features.py`, `xg_train.py`, `xg_score.py`. The active model is the row in `xg_models` with `active = true`; its file is in R2. Model `xg-2026-10-02`: trained on 2022-23 to 2024-25, tested on 2025-26: log loss 0.2185 (distance-and-angle baseline 0.2464), AUC 0.783.
-- Season adjustment: league xG differs from league goals by a few percent each season (between -3.6% and +4.8% in testing). Raw xG is stored; anything shown as "above expected" (goals above expected, GSAx) multiplies xG by the season's factor in the `xg_season_factor` view (league goals / league xG), so each season's totals balance. Percentages such as xGF% are unaffected.
+- Season adjustment: league xG differs from league goals by a few percent each season (between -3.6% and +4.8% in testing). Raw xG is stored; anything shown as "above expected" (goals above expected, GSAx) multiplies xG by the season's factor in the `xg_season_factor` view (league goals / league xG), so each season's totals balance. Percentages such as xGF% are unaffected. Early in a season the factor is steadied by adding 1,000 goals' worth of "as expected" to both sides (it was 1.12 after 109 goals); a full season moves by under 0.3%.
 - High-danger chances: unblocked shots with xG of 0.15 or more.
 - After training a new model with `--activate`, the on-ice job recomputes every game whose `xg_version` differs.
 
@@ -200,6 +200,7 @@ Estimate market AAV with a comparables model (nearest neighbors on age, position
 
 ### Team need grades
 Categories: goal scoring, playmaking, physicality, 5v5 defense, power play, penalty kill, goaltending, prospect depth. Compute each team's metric, z-score across 32 teams, map to grades -2 (Need), -1 (Thin), 0 (Average), 1 (Solid), 2 (Surplus). Document the metric used for each category.
+- Implemented 2026-10-02 in `pipeline/models/team_grades.py`, run nightly into `team_grades`. Metrics: goal scoring = goals for per game (all situations); playmaking = primary assists per game; physicality = hits plus blocked shots per game; 5v5 defense = 5v5 xG against per 60 (lower is better); power play = PP% and penalty kill = PK% (NHL figures, weighted by games across seasons); goaltending = GSAx per game. Grades: z <= -1.0 Need, below -0.4 Thin, within 0.4 Average, below 1.0 Solid, 1.0 or more Surplus. Until every team has played 20 games, last season's games are included. Prospect depth is not graded yet (no source measures prospect quality); the League page shows it as blank.
 
 ### Perception gap and "Undervalued on this roster"
 - Perception gap = performance percentile - fan sentiment score (both 0-100). Performance percentile blends, by position, xGF%, WAR, and Game Score percentiles. Until WAR exists (Phase 5), the blend uses xGF% and Game Score only, and pages say so.
