@@ -255,6 +255,22 @@ def pbp_credits(pbp: dict) -> dict[int, dict[str, int]]:
     return credits
 
 
+PLAY_PENALTIES = {"MIN", "MAJ", "MATCH", "PS"}  # misconducts leave the teams at full strength
+
+
+def penalty_counts(pbp: dict) -> dict[int, dict[str, int]]:
+    """Penalties drawn and taken per player (for Game Score). Bench minors name no player."""
+    counts: dict[int, dict[str, int]] = {}
+    for play in field(pbp, "plays", "play-by-play"):
+        details = play.get("details") or {}
+        if play.get("typeDescKey") != "penalty" or details.get("typeCode") not in PLAY_PENALTIES:
+            continue
+        for key, player in (("taken", details.get("committedByPlayerId")), ("drawn", details.get("drawnByPlayerId"))):
+            if player:
+                counts.setdefault(player, {"drawn": 0, "taken": 0})[key] += 1
+    return counts
+
+
 @dataclass(frozen=True)
 class PlayerInfo:
     id: int

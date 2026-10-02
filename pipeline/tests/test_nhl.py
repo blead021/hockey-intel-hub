@@ -162,3 +162,17 @@ def test_current_season_rolls_over_in_september():
     assert current_season(date(2026, 10, 2)) == 20262027
     assert current_season(date(2027, 3, 1)) == 20262027
     assert current_season(date(2027, 9, 1)) == 20272028
+
+
+def test_penalty_counts_skip_misconducts_and_bench_minors():
+    pbp = {"plays": [
+        {"typeDescKey": "penalty", "details": {"typeCode": "MIN", "committedByPlayerId": 1, "drawnByPlayerId": 2}},
+        {"typeDescKey": "penalty", "details": {"typeCode": "MAJ", "committedByPlayerId": 1, "drawnByPlayerId": 3}},
+        {"typeDescKey": "penalty", "details": {"typeCode": "PS", "committedByPlayerId": 4, "drawnByPlayerId": 2}},
+        {"typeDescKey": "penalty", "details": {"typeCode": "MIS", "committedByPlayerId": 5}},
+        {"typeDescKey": "penalty", "details": {"typeCode": "BEN", "servedByPlayerId": 6}},
+    ]}
+    counts = nhl.penalty_counts(pbp)
+    assert counts[1] == {"drawn": 0, "taken": 2}
+    assert counts[2] == {"drawn": 2, "taken": 0}
+    assert 5 not in counts and 6 not in counts

@@ -227,6 +227,7 @@ export type SkaterSeason = {
   pk_toi_sec: number | null;
   fow: number;
   fol: number;
+  game_score: number | null;
 };
 
 export async function getSkaterSeasons(sql: Sql, playerId: number) {
@@ -235,7 +236,9 @@ export async function getSkaterSeasons(sql: Sql, playerId: number) {
            sum(gp)::int as gp, sum(g)::int as g, sum(a)::int as a, sum(a1)::int as a1, sum(pts)::int as pts,
            sum(plus_minus)::int as plus_minus, sum(sog)::int as sog, sum(hits)::int as hits,
            sum(blocks)::int as blocks, sum(toi_sec)::int as toi_sec, sum(pp_toi_sec)::int as pp_toi_sec,
-           sum(pk_toi_sec)::int as pk_toi_sec, sum(fow)::int as fow, sum(fol)::int as fol
+           sum(pk_toi_sec)::int as pk_toi_sec, sum(fow)::int as fow, sum(fol)::int as fol,
+           (select avg(gs.game_score)::float8 from skater_game_score gs join games g on g.id = gs.game_id
+              where gs.player_id = ${playerId} and g.season_id = s.season_id and g.game_type = 2) as game_score
     from skater_season_stats s join teams t on t.id = s.team_id
     where s.player_id = ${playerId} and s.game_type = 2
     group by s.season_id order by s.season_id desc`;
@@ -254,6 +257,7 @@ export type GoalieSeason = {
   ga: number;
   toi_sec: number;
   gsax: number | null;
+  game_score: number | null;
 };
 
 export async function getGoalieSeasons(sql: Sql, playerId: number) {
@@ -263,7 +267,9 @@ export async function getGoalieSeasons(sql: Sql, playerId: number) {
            sum(saves)::int as saves, sum(ga)::int as ga, sum(toi_sec)::int as toi_sec,
            (select sum(x.xga)::float8 * coalesce(max(f.factor), 1)::float8 - sum(x.goals_against)::float8
               from goalie_season_xg x left join xg_season_factor f on f.season_id = x.season_id
-              where x.player_id = ${playerId} and x.season_id = s.season_id and x.game_type = 2) as gsax
+              where x.player_id = ${playerId} and x.season_id = s.season_id and x.game_type = 2) as gsax,
+           (select avg(gs.game_score)::float8 from goalie_game_score gs join games g on g.id = gs.game_id
+              where gs.player_id = ${playerId} and g.season_id = s.season_id and g.game_type = 2) as game_score
     from goalie_season_stats s join teams t on t.id = s.team_id
     where s.player_id = ${playerId} and s.game_type = 2
     group by s.season_id order by s.season_id desc`;
@@ -283,6 +289,7 @@ export type SkaterGame = {
   toi_sec: number;
   fow: number;
   fol: number;
+  game_score: number | null;
 };
 
 export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) {
@@ -294,9 +301,11 @@ export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) 
              when (g.home_team_id = s.team_id) = (g.home_score > g.away_score) then 'W'
              when g.last_period_type = 'REG' then 'L' else 'OTL'
            end || ' ' || greatest(g.home_score, g.away_score) || '-' || least(g.home_score, g.away_score) as result,
-           s.g, (s.a1 + s.a2) as a, (s.g + s.a1 + s.a2) as pts, s.plus_minus, s.sog, s.toi_sec, s.fow, s.fol
+           s.g, (s.a1 + s.a2) as a, (s.g + s.a1 + s.a2) as pts, s.plus_minus, s.sog, s.toi_sec, s.fow, s.fol,
+           gs.game_score::float8 as game_score
     from game_skater_stats s
     join games g on g.id = s.game_id
+    left join skater_game_score gs on gs.player_id = s.player_id and gs.game_id = s.game_id
     join teams home on home.id = g.home_team_id
     join teams away on away.id = g.away_team_id
     where s.player_id = ${playerId}

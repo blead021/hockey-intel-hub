@@ -124,6 +124,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
                   <Th>SOG</Th>
                   <Th>TOI</Th>
                   <Th>FO W-L</Th>
+                  <Th>Game Score</Th>
                 </tr>
               </thead>
               <tbody>
@@ -139,6 +140,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
                     <Td>{g.sog}</Td>
                     <Td>{toi(g.toi_sec)}</Td>
                     <Td>{g.fow + g.fol ? `${g.fow}-${g.fol}` : "—"}</Td>
+                    <Td>{num(g.game_score, 2)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -238,6 +240,7 @@ function SkaterCards({ seasons, current }: { seasons: SkaterSeason[]; current: n
         <StatCard label="Points" value={s.pts} detail={s.gp ? `${num(s.pts / s.gp, 2)} per game` : undefined} />
         <StatCard label="TOI / GP" value={toi(s.toi_sec / s.gp)} />
         <StatCard label="Faceoff %" value={faceoffPct(s.fow, s.fol)} detail={`${s.fow}-${s.fol}`} />
+        <StatCard label="Game Score" value={num(s.game_score, 2)} detail="average per game" />
       </CardGrid>
     </>
   );
@@ -257,6 +260,7 @@ function GoalieSections({ seasons, current }: { seasons: GoalieSeason[]; current
             <StatCard label="GAA" value={s.toi_sec ? num((s.ga * 3600) / s.toi_sec, 2) : "—"} />
             <StatCard label="Shots against" value={s.shots_against} />
             <StatCard label="GSAx" value={s.gsax == null ? "—" : signed(Math.round(s.gsax * 10) / 10)} detail="goals saved above expected" />
+            <StatCard label="Game Score" value={num(s.game_score, 2)} detail="average per game" />
           </CardGrid>
         </>
       )}
