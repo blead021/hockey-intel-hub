@@ -114,7 +114,7 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
       -- Cap hit charged to this team: the full hit minus any share the previous team retained.
       select (cap_hit * (1 - coalesce(retained_pct, 0) / 100))::float8 as cap_hit, end_season, expiry_status, clause
       from contracts
-      where player_id = p.id and status = 'active' and ${season} between start_season and end_season
+      where player_id = p.id and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
       order by start_season desc limit 1) c on true
     order by pts desc, g desc, toi_sec desc, name`;
 }
@@ -174,7 +174,7 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
       -- Cap hit charged to this team: the full hit minus any share the previous team retained.
       select (cap_hit * (1 - coalesce(retained_pct, 0) / 100))::float8 as cap_hit, end_season, expiry_status, clause
       from contracts
-      where player_id = p.id and status = 'active' and ${season} between start_season and end_season
+      where player_id = p.id and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
       order by start_season desc limit 1) c on true
     order by gp desc, name`;
 }
@@ -331,7 +331,7 @@ export async function getCurrentContract(sql: Sql, playerId: number, season: num
   const [row] = await sql<Contract[]>`
     select cap_hit::float8 as cap_hit, aav::float8 as aav, start_season, end_season, expiry_status, clause,
            no_trade_list_size, retained_pct::float8 as retained_pct
-    from contracts where player_id = ${playerId} and status = 'active' and ${season} between start_season and end_season
+    from contracts where player_id = ${playerId} and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
     order by start_season desc limit 1`;
   return row;
 }
@@ -709,7 +709,7 @@ export async function getRetainedCharges(sql: Sql, teamId: number, season: numbe
            c.retained_pct::float8 as pct, (c.cap_hit * c.retained_pct / 100)::float8 as charge
     from contracts c join teams t on t.id = c.team_id left join players p on p.id = c.player_id
     where c.retained_by = ${teamId} and c.retained_pct > 0 and c.status = 'active'
-      and ${season} between c.start_season and c.end_season
+      and ${season} between coalesce(c.start_season, 0) and c.end_season
     order by charge desc`;
 }
 
@@ -725,7 +725,7 @@ export async function getReserveList(sql: Sql, teamId: number, season: number): 
            date_part('year', age(p.birth_date))::int as age, c.cap_hit::float8 as cap_hit, c.end_season,
            c.expiry_status, c.contract_type
     from contracts c left join players p on p.id = c.player_id
-    where c.team_id = ${teamId} and c.status = 'active' and ${season} between c.start_season and c.end_season
+    where c.team_id = ${teamId} and c.status = 'active' and ${season} between coalesce(c.start_season, 0) and c.end_season
       and (p.id is null or p.current_team_id is distinct from ${teamId})
     order by c.cap_hit desc nulls last, name`;
 }
@@ -734,6 +734,6 @@ export async function getReserveList(sql: Sql, teamId: number, season: number): 
 export async function getContractCount(sql: Sql, teamId: number, season: number): Promise<number> {
   const [row] = await sql<{ n: number }[]>`
     select count(*)::int as n from contracts
-    where team_id = ${teamId} and status = 'active' and ${season} between start_season and end_season`;
+    where team_id = ${teamId} and status = 'active' and ${season} between coalesce(start_season, 0) and end_season`;
   return row?.n ?? 0;
 }

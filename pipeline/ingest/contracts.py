@@ -251,12 +251,16 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
     """
     roster = conn.execute(
         """select p.id, p.first_name, p.last_name, t.abbrev, p.birth_date
-           from players p join teams t on t.id = p.current_team_id"""
+           from players p join teams t on t.id = coalesce(p.current_team_id, p.rights_team_id)"""
     ).fetchall()
     born = {pid: birth for pid, _, _, _, birth in roster}
     by_full: dict[str, list] = {}
     for pid, first, last, team, _ in roster:
         by_full.setdefault(normalize(f"{first} {last}"), []).append((pid, team))
+    # Everyone we know, including depth players with no current NHL team or prospect listing.
+    anyone: dict[str, list] = {}
+    for pid, first, last in conn.execute("select id, first_name, last_name from players").fetchall():
+        anyone.setdefault(normalize(f"{first} {last}"), []).append((pid, None))
     matches = {}
     for r in rows:
         candidates = conn.execute(
@@ -279,8 +283,53 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
                 if team == r.team and normalize(last).split(" ")[-1] in wanted[1:]
             ]
             candidates = surname_fits if len(surname_fits) == 1 else []
+        if not candidates:
+            # 4. A name that belongs to exactly one player we know, on any team.
+            candidates = anyone.get(normalize(r.player), [])
         matches[r.line] = candidates[0][0] if len(candidates) == 1 else None
     return matches
+
+
+PLAYER_SEARCH = "https://search.d3.nhle.com/api/v1/search/player"
+
+
+def lookup_unmatched(conn, http, rows: list[ContractRow], matches: dict[int, int | None], teams: dict[str, int], counts) -> None:
+    """Players under contract who never played an NHL game (and are not on a prospect list) are not in our
+    players table yet. Find each by exact name in the NHL's player search, preferring the contract's team,
+    add him with his NHL profile, and record the contract team as holding his rights."""
+    from pipeline.http import get_json
+    from pipeline.ingest import nhl
+    from pipeline.ingest.nhl_players import upsert_players
+
+    for r in rows:
+        if matches[r.line] is not None:
+            continue
+        results = get_json(http, PLAYER_SEARCH, params={"culture": "en-us", "limit": 20, "q": r.player})
+        same_name = [x for x in results if normalize(x.get("name") or "") == normalize(r.player)]
+        on_team = [x for x in same_name if r.team in (x.get("teamAbbrev"), x.get("lastTeamAbbrev"))]
+        found = on_team if len(on_team) == 1 else same_name if len(same_name) == 1 else []
+        if not found:
+            # Formal first names (Michael for Mike, Zachary for Zac): same surname, same team, same first initial.
+            first, last = normalize(r.player).split(" ", 1)[0], normalize(r.player).split(" ")[-1]
+            by_surname = get_json(http, PLAYER_SEARCH, params={"culture": "en-us", "limit": 40, "q": last})
+            found = [
+                x for x in by_surname
+                if normalize(x.get("name") or "").split(" ")[-1] == last
+                and normalize(x.get("name") or "")[:1] == first[:1]
+                and r.team in (x.get("teamAbbrev"), x.get("lastTeamAbbrev"))
+            ]
+            if len(found) != 1:
+                continue
+        player_id = int(found[0]["playerId"])
+        info = nhl.parse_landing(nhl.player_landing(http, player_id))
+        with conn.transaction():
+            upsert_players(conn, [info])
+            conn.execute(
+                "update players set rights_team_id = %s where id = %s and current_team_id is null",
+                (teams[r.team], player_id),
+            )
+        matches[r.line] = player_id
+        counts["players_added_from_search"] += 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -309,6 +358,9 @@ def main(argv: list[str] | None = None) -> int:
                 r = ContractRow(**{**r.__dict__, "retained_by": None})
             good.append(r)
         matches = match_players(conn, good)
+        from pipeline.http import client
+        with client() as http:
+            lookup_unmatched(conn, http, good, matches, teams, counts)
         # One contract per player per start season. Keep the row for the player's current NHL team
         # (otherwise the first row) and report the rest.
         current_team = dict(conn.execute(
@@ -353,7 +405,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Loaded {len(good)} contracts from {args.path.name}.")
     if result.problems:
         print(f"\n{len(result.problems)} problems (row numbers match the spreadsheet):")
-        for line, player, problem in sorted(result.problems):
+        # One line for the many rows that only lack a start season (stored as unknown).
+        no_start = [p for p in result.problems if p[2] == "start_season is missing"]
+        if no_start:
+            print(f"  {len(no_start)} rows have no start_season; loaded with it unknown "
+                  f"(rows {', '.join(str(p[0]) for p in sorted(no_start)[:8])}, ...)")
+        for line, player, problem in sorted(p for p in result.problems if p not in no_start):
             print(f"  row {line}  {player}: {problem}")
     return 0
 
