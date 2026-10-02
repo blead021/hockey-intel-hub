@@ -15,6 +15,7 @@ import argparse
 import os
 from collections import Counter
 
+from pipeline.claude import client as claude_client
 from pipeline.db import connect
 from pipeline.http import client
 from pipeline.jobs import job_run
@@ -64,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise RuntimeError("ANTHROPIC_API_KEY is not set, so contract news cannot be read. Add it to .env and GitHub secrets.")
 
-        claude = anthropic.Anthropic()
+        claude = claude_client()
         team_codes = dict(conn.execute("select abbrev, name from teams where active").fetchall())
         teams = dict(conn.execute("select abbrev, id from teams where active").fetchall())
         applier = Applier(conn, getattr(counts, "run_id", None), MODEL, teams, create_only=args.backfill)

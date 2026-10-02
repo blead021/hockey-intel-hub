@@ -17,6 +17,7 @@ import json
 import os
 from collections import defaultdict
 
+from pipeline.claude import client as claude_client
 from pipeline.db import connect
 from pipeline.jobs import job_run
 from pipeline.sources import is_enabled
@@ -231,7 +232,7 @@ def main(argv: list[str] | None = None) -> None:
             return
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise RuntimeError("ANTHROPIC_API_KEY is not set, so mentions cannot be scored.")
-        client = anthropic.Anthropic()
+        client = claude_client()
         collect(conn, client, counts)
         submit(conn, client, args.max, counts)
     print(f"sentiment score ok: {dict(counts)}")

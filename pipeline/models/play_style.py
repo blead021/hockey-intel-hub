@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 
+from pipeline.claude import client as claude_client
 from pipeline.db import connect
 from pipeline.jobs import job_run
 from pipeline.sources import is_enabled
@@ -231,7 +232,7 @@ def main(argv: list[str] | None = None) -> None:
             return
         if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
             raise RuntimeError("ANTHROPIC_API_KEY is not set, so play styles cannot be written.")
-        client = anthropic.Anthropic()
+        client = claude_client()
         collect(conn, client, counts)
         submit(conn, client, args.max, counts)
     print(f"play style ok: {dict(counts)}")
