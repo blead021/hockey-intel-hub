@@ -1,6 +1,6 @@
-# Puckwise
+# PuckSleuth
 
-Product name: **Puckwise** is a working name only (2026-10-02). Brian is choosing a new one because two other hockey analytics projects already use Puckwise; the final name goes in `web/src/lib/site.ts` (SITE_NAME). Infrastructure names (GitHub repo, Cloudflare Worker, Neon project, R2 bucket, Hyperdrive config, local folder) intentionally keep the hockey-intel names; only the public name is Puckwise.
+Product name: **PuckSleuth** (chosen 2026-10-02; domain pucksleuth.com). Earlier working names, Hockey Intel Hub and Puckwise, are retired; Puckwise was dropped because other hockey analytics projects use it. The name lives in `web/src/lib/site.ts` (SITE_NAME). Infrastructure names (GitHub repo, Cloudflare Worker, Neon project, R2 bucket, Hyperdrive config, local folder) intentionally keep the hockey-intel names; only the public name is PuckSleuth.
 
 A subscription web app that gives hockey fans "front office tools": player stats, advanced analytics, fan and beat-writer sentiment, trade chatter, contracts, and age, organized into connected screens: League, My Team / Team Roster, Player Profile, Trade Targets, Trade Builder, and a Rumor Tracker.
 

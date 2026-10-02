@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-USER_AGENT = "Puckwise/0.1 (+https://hockey-intel-hub.hockey-intel-web.workers.dev)"
+USER_AGENT = "PuckSleuth/0.1 (+https://pucksleuth.com)"
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 MAX_WAIT_SECONDS = 60
 

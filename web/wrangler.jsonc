@@ -9,6 +9,12 @@
 		"binding": "ASSETS"
 	},
 	"observability": { "enabled": true },
+	// The public address. Cloudflare creates the DNS records and certificate on deploy,
+	// because the pucksleuth.com domain is registered in the same Cloudflare account.
+	"routes": [
+		{ "pattern": "pucksleuth.com", "custom_domain": true },
+		{ "pattern": "www.pucksleuth.com", "custom_domain": true }
+	],
 	// Hyperdrive pools connections from Workers to Neon.
 	// Config "hockey-intel-neon", created with `wrangler hyperdrive create`.
 	"hyperdrive": [

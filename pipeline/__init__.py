@@ -1,1 +1,1 @@
-"""Puckwise data pipeline."""
+"""PuckSleuth data pipeline."""

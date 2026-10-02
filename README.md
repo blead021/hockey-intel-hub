@@ -1,4 +1,4 @@
-# Puckwise
+# PuckSleuth
 
 Front office tools for hockey fans: player stats, advanced analytics, fan and beat-writer sentiment,
 trade chatter, and contracts. See `CLAUDE.md` for the full product and build plan.
