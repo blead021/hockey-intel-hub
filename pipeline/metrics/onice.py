@@ -70,6 +70,10 @@ class Line:
     xga: float = 0.0
     hdcf: int = 0
     hdca: int = 0
+    pp_xgf: float = 0.0  # power play: his team has more skaters, both goalies in
+    pp_xga: float = 0.0
+    sh_xgf: float = 0.0  # penalty kill: his team has fewer skaters, both goalies in
+    sh_xga: float = 0.0
 
 
 @dataclass
@@ -171,7 +175,9 @@ def compute_game(pbp: dict, shift_body: dict, xg_by_event: dict[int, float] | No
         shifts_by_period[s.period].append(s)
 
     for play in nhl_field(pbp, "plays", "play-by-play"):
-        if play.get("situationCode") != FIVE_ON_FIVE:
+        situation = play.get("situationCode") or ""
+        if situation != FIVE_ON_FIVE:
+            add_special_teams_xg(play, situation, xg_by_event, team_of, home, away, shifts_by_period, line)
             continue
         period_info = play.get("periodDescriptor") or {}
         if period_info.get("periodType") == "SO":
@@ -258,6 +264,34 @@ def shooting_and_goalies(rows, xg_by_event: dict[int, float]) -> tuple[dict[int,
     return shooters, goalies
 
 
+def add_special_teams_xg(play, situation, xg_by_event, team_of, home, away, shifts_by_period, line) -> None:
+    """Power-play and penalty-kill on-ice xG for one unblocked shot outside 5v5 (both goalies in net)."""
+    if not xg_by_event or len(situation) != 4 or situation[0] != "1" or situation[3] != "1":
+        return
+    if play.get("typeDescKey") not in ("goal", "shot-on-goal", "missed-shot"):
+        return
+    if (play.get("periodDescriptor") or {}).get("periodType") == "SO":
+        return
+    xg = xg_by_event.get(play.get("eventId"))
+    details = play.get("details") or {}
+    shooting = team_of.get(details.get("shootingPlayerId") or details.get("scoringPlayerId"))
+    if xg is None or shooting not in (home, away):
+        return
+    away_skaters, home_skaters = int(situation[1]), int(situation[2])
+    if away_skaters == home_skaters:
+        return  # 4-on-4 and 3-on-3 are neither power play nor penalty kill
+    period, t = (play.get("periodDescriptor") or {}).get("number"), toi_seconds(play.get("timeInPeriod"))
+    for s in shifts_by_period.get(period, []):
+        if not s.start < t <= s.end:
+            continue
+        own = home_skaters if s.team_id == home else away_skaters
+        opp = away_skaters if s.team_id == home else home_skaters
+        prefix = "pp" if own > opp else "sh"
+        side = "xgf" if s.team_id == shooting else "xga"
+        pl = line(s.player_id, s.team_id)
+        setattr(pl, f"{prefix}_{side}", getattr(pl, f"{prefix}_{side}") + xg)
+
+
 def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, goalies: dict | None = None,
           xg_version: str | None = None) -> None:
     def xg(value: float) -> float | None:
@@ -272,11 +306,12 @@ def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, 
         with conn.cursor() as cur:
             cur.executemany(
                 """insert into player_game_onice (player_id, game_id, team_id, toi_5v5_sec, cf, ca, ff, fa, sf, sa,
-                       gf, ga, xgf, xga, hdcf, hdca, oz_starts, nz_starts, dz_starts)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                       gf, ga, xgf, xga, hdcf, hdca, oz_starts, nz_starts, dz_starts, pp_xgf, pp_xga, sh_xgf, sh_xga)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 [
                     (pid, game_id, team, l.toi, l.cf, l.ca, l.ff, l.fa, l.sf, l.sa, l.gf, l.ga,
-                     xg(l.xgf), xg(l.xga), hd(l.hdcf), hd(l.hdca), l.oz, l.nz, l.dz)
+                     xg(l.xgf), xg(l.xga), hd(l.hdcf), hd(l.hdca), l.oz, l.nz, l.dz,
+                     xg(l.pp_xgf), xg(l.pp_xga), xg(l.sh_xgf), xg(l.sh_xga))
                     for pid, (team, l) in result.players.items()
                 ],
             )

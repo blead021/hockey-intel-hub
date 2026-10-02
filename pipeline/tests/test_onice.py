@@ -138,3 +138,13 @@ def test_shooting_and_goalie_totals():
     assert (shooters[12].goals, round(shooters[12].ixg, 2)) == (1, 0.8)
     g = goalies[40]  # the empty-net goal does not count against him
     assert (g.shots_faced, g.goals_against, round(g.xga, 2)) == (2, 1, 0.4)
+
+
+def test_power_play_and_penalty_kill_xg():
+    plays = [{**p, "eventId": n} for n, p in enumerate(PBP["plays"])]
+    # Event 2 (0:50) is a home shot at 1451: away has 4 skaters, so home is on the power play.
+    pbp = {**PBP, "plays": plays}
+    r = compute_game(pbp, SHIFTS, {2: 0.3})
+    assert round(line(r, 11).pp_xgf, 2) == 0.3 and line(r, 11).sh_xgf == 0
+    assert round(line(r, 21).sh_xga, 2) == 0.3 and line(r, 21).pp_xga == 0
+    assert line(r, 11).xgf == 0  # not a 5v5 shot

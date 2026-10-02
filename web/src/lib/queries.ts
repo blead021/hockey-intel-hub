@@ -237,7 +237,7 @@ export async function getSkaterSeasons(sql: Sql, playerId: number) {
            sum(plus_minus)::int as plus_minus, sum(sog)::int as sog, sum(hits)::int as hits,
            sum(blocks)::int as blocks, sum(toi_sec)::int as toi_sec, sum(pp_toi_sec)::int as pp_toi_sec,
            sum(pk_toi_sec)::int as pk_toi_sec, sum(fow)::int as fow, sum(fol)::int as fol,
-           (select avg(gs.game_score)::float8 from skater_game_score gs join games g on g.id = gs.game_id
+           (select avg(gs.game_score)::float8 from player_game_score gs join games g on g.id = gs.game_id
               where gs.player_id = ${playerId} and g.season_id = s.season_id and g.game_type = 2) as game_score
     from skater_season_stats s join teams t on t.id = s.team_id
     where s.player_id = ${playerId} and s.game_type = 2
@@ -268,7 +268,7 @@ export async function getGoalieSeasons(sql: Sql, playerId: number) {
            (select sum(x.xga)::float8 * coalesce(max(f.factor), 1)::float8 - sum(x.goals_against)::float8
               from goalie_season_xg x left join xg_season_factor f on f.season_id = x.season_id
               where x.player_id = ${playerId} and x.season_id = s.season_id and x.game_type = 2) as gsax,
-           (select avg(gs.game_score)::float8 from goalie_game_score gs join games g on g.id = gs.game_id
+           (select avg(gs.game_score)::float8 from player_game_score gs join games g on g.id = gs.game_id
               where gs.player_id = ${playerId} and g.season_id = s.season_id and g.game_type = 2) as game_score
     from goalie_season_stats s join teams t on t.id = s.team_id
     where s.player_id = ${playerId} and s.game_type = 2
@@ -305,7 +305,7 @@ export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) 
            gs.game_score::float8 as game_score
     from game_skater_stats s
     join games g on g.id = s.game_id
-    left join skater_game_score gs on gs.player_id = s.player_id and gs.game_id = s.game_id
+    left join player_game_score gs on gs.player_id = s.player_id and gs.game_id = s.game_id
     join teams home on home.id = g.home_team_id
     join teams away on away.id = g.away_team_id
     where s.player_id = ${playerId}
@@ -481,6 +481,42 @@ export async function getSkaterAdvanced(sql: Sql, playerId: number, season: numb
       m("OZS%", r.ozs_pct, r.p_ozs_pct),
     ],
   };
+}
+
+export type GameScoreBreakdown = {
+  season_id: number;
+  gp: number;
+  total: number;
+  per_game: number;
+  parts: { key: string; value: number }[];
+};
+
+// Season totals of each Game Score part (goals above average), for the profile breakdown.
+export async function getGameScoreBreakdown(sql: Sql, playerId: number, season: number): Promise<GameScoreBreakdown | undefined> {
+  const [r] = await sql<
+    { gp: number; ev_offense: number; ev_defense: number; power_play: number; penalty_kill: number; finishing: number;
+      playmaking: number; penalties: number; faceoffs: number; goaltending: number; total: number }[]
+  >`
+    select count(*)::int as gp, sum(ev_offense)::float8 as ev_offense, sum(ev_defense)::float8 as ev_defense,
+           sum(power_play)::float8 as power_play, sum(penalty_kill)::float8 as penalty_kill,
+           sum(finishing)::float8 as finishing, sum(playmaking)::float8 as playmaking,
+           sum(penalties)::float8 as penalties, sum(faceoffs)::float8 as faceoffs,
+           sum(goaltending)::float8 as goaltending, sum(game_score)::float8 as total
+    from player_game_score gs join games g on g.id = gs.game_id
+    where gs.player_id = ${playerId} and g.season_id = ${season} and g.game_type = 2`;
+  if (!r || !r.gp) return undefined;
+  const parts = [
+    { key: "Even strength offense", value: r.ev_offense },
+    { key: "Even strength defense", value: r.ev_defense },
+    { key: "Power play", value: r.power_play },
+    { key: "Penalty kill", value: r.penalty_kill },
+    { key: "Finishing", value: r.finishing },
+    { key: "Playmaking", value: r.playmaking },
+    { key: "Penalties", value: r.penalties },
+    { key: "Faceoffs", value: r.faceoffs },
+    { key: "Goaltending", value: r.goaltending },
+  ].filter((p) => Math.abs(p.value) >= 0.05);
+  return { season_id: season, gp: r.gp, total: r.total, per_game: r.total / r.gp, parts };
 }
 
 // The season to show advanced metrics for: the most recent one with at least 100 minutes at 5v5

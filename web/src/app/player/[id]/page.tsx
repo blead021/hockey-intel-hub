@@ -7,6 +7,7 @@ import { faceoffPct, heightFt, money, num, pct, season as seasonLabel, shortDate
 import {
   getCurrentContract,
   getEnabledSources,
+  getGameScoreBreakdown,
   getLatestOniceSeason,
   getSkaterAdvanced,
   getGoalieSeasons,
@@ -15,6 +16,7 @@ import {
   getSkaterLastGames,
   getSkaterSeasons,
   type Edge,
+  type GameScoreBreakdown,
   type GoalieSeason,
   type SkaterAdvanced,
   type SkaterSeason,
@@ -42,7 +44,10 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
     if (!player) return null;
     const isGoalie = player.position === "G";
     const oniceSeason = isGoalie ? undefined : await getLatestOniceSeason(sql, id);
-    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced] = await Promise.all([
+    const breakdownSeason = isGoalie
+      ? (await sql<{ s: number | null }[]>`select max(g.season_id) as s from player_game_score gs join games g on g.id = gs.game_id where gs.player_id = ${id} and g.game_type = 2`)[0]?.s
+      : oniceSeason;
+    const [skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown] = await Promise.all([
       isGoalie ? Promise.resolve([]) : getSkaterSeasons(sql, id),
       isGoalie ? getGoalieSeasons(sql, id) : Promise.resolve([]),
       isGoalie ? Promise.resolve([]) : getSkaterLastGames(sql, id),
@@ -50,11 +55,12 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
       isGoalie ? Promise.resolve(undefined) : getLatestEdge(sql, id),
       getEnabledSources(sql),
       oniceSeason ? getSkaterAdvanced(sql, id, oniceSeason) : Promise.resolve(undefined),
+      breakdownSeason ? getGameScoreBreakdown(sql, id, breakdownSeason) : Promise.resolve(undefined),
     ]);
-    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced };
+    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown };
   });
   if (!data) notFound();
-  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced } = data;
+  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, edge, sources, advanced, breakdown } = data;
 
   const bio = [
     player.position,
@@ -102,7 +108,10 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
       )}
 
       {isGoalie ? (
-        <GoalieSections seasons={goalieSeasons} current={season} />
+        <>
+          <GoalieSections seasons={goalieSeasons} current={season} />
+          <GameScoreSection breakdown={breakdown} />
+        </>
       ) : (
         <>
           <SkaterCards seasons={skaterSeasons} current={season} />
@@ -140,7 +149,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
                     <Td>{g.sog}</Td>
                     <Td>{toi(g.toi_sec)}</Td>
                     <Td>{g.fow + g.fol ? `${g.fow}-${g.fol}` : "—"}</Td>
-                    <Td>{num(g.game_score, 2)}</Td>
+                    <Td>{signedNum(g.game_score)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -196,6 +205,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
           )}
 
           <AdvancedSection advanced={advanced} position={player.position} />
+          <GameScoreSection breakdown={breakdown} />
 
           {sources.has("nhl_edge") && <EdgeSection edge={edge} />}
         </>
@@ -240,7 +250,7 @@ function SkaterCards({ seasons, current }: { seasons: SkaterSeason[]; current: n
         <StatCard label="Points" value={s.pts} detail={s.gp ? `${num(s.pts / s.gp, 2)} per game` : undefined} />
         <StatCard label="TOI / GP" value={toi(s.toi_sec / s.gp)} />
         <StatCard label="Faceoff %" value={faceoffPct(s.fow, s.fol)} detail={`${s.fow}-${s.fol}`} />
-        <StatCard label="Game Score" value={num(s.game_score, 2)} detail="average per game" />
+        <StatCard label="Game Score" value={signedNum(s.game_score)} detail="goals above average, per game" />
       </CardGrid>
     </>
   );
@@ -260,7 +270,7 @@ function GoalieSections({ seasons, current }: { seasons: GoalieSeason[]; current
             <StatCard label="GAA" value={s.toi_sec ? num((s.ga * 3600) / s.toi_sec, 2) : "—"} />
             <StatCard label="Shots against" value={s.shots_against} />
             <StatCard label="GSAx" value={s.gsax == null ? "—" : signed(Math.round(s.gsax * 10) / 10)} detail="goals saved above expected" />
-            <StatCard label="Game Score" value={num(s.game_score, 2)} detail="average per game" />
+            <StatCard label="Game Score" value={signedNum(s.game_score)} detail="goals above average, per game" />
           </CardGrid>
         </>
       )}
@@ -397,5 +407,49 @@ function PercentileBar({ value, neutral }: { value: number | null; neutral: bool
       </div>
       <span className="w-8 text-right font-mono text-xs text-muted">{rank}</span>
     </div>
+  );
+}
+
+function signedNum(value: number | null | undefined, digits = 2): string {
+  if (value == null) return "—";
+  const text = value.toFixed(digits);
+  return value > 0 ? `+${text}` : text;
+}
+
+function GameScoreSection({ breakdown }: { breakdown: GameScoreBreakdown | undefined }) {
+  if (!breakdown) return null;
+  const largest = Math.max(...breakdown.parts.map((p) => Math.abs(p.value)), 0.01);
+  return (
+    <>
+      <SectionTitle note={`${seasonLabel(breakdown.season_id)} · ${breakdown.gp} GP · goals above average`}>
+        Where his Game Score comes from
+      </SectionTitle>
+      <div className="rounded-lg border border-border bg-surface p-4">
+        <p className="mb-4 text-sm">
+          Season total <span className="font-mono font-medium">{signedNum(breakdown.total, 1)}</span> goals, or{" "}
+          <span className="font-mono font-medium">{signedNum(breakdown.per_game)}</span> per game.
+        </p>
+        <dl className="space-y-2">
+          {breakdown.parts.map((p) => (
+            <div key={p.key} className="grid grid-cols-[10rem_4rem_1fr] items-center gap-3">
+              <dt className="text-sm text-muted">{p.key}</dt>
+              <dd className="text-right font-mono text-sm">{signedNum(p.value, 1)}</dd>
+              <dd className="flex h-2 items-center" aria-hidden>
+                <div
+                  className={`h-2 rounded-full ${p.value >= 0 ? "bg-positive" : "bg-negative"}`}
+                  style={{ width: `${Math.max((Math.abs(p.value) / largest) * 100, 2)}%` }}
+                />
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-4 text-xs text-muted">
+          Game Score adds up a player&apos;s impact in goals compared with an average player given the same ice time:
+          his share of expected goals for and against at even strength, on the power play, and on the penalty kill,
+          plus finishing (goals minus expected goals), primary assists, penalties drawn and taken, and faceoffs. Goalies
+          are measured by goals saved above expected.
+        </p>
+      </div>
+    </>
   );
 }

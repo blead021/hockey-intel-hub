@@ -102,10 +102,8 @@ Base: `https://api-web.nhle.com/v1/` and `https://api.nhle.com/stats/rest/en/`. 
 - Behind the `contract_news` data source switch. The Claude API is a paid service (estimated $3-5 per month at current volume); it needs `ANTHROPIC_API_KEY`.
 - Cap ceiling 2026-27: $104,000,000. Store per season in a `cap_limits` table.
 
-### HockeyStatCards
-- Brian subscribes to the post-game email cards. Read labeled emails through the Gmail API, extract numbers from the card images with Claude vision, and store them in `hsc_game_scores`.
-- Cross-check extracted goals, assists, and TOI against the NHL boxscore. Flag mismatches for review instead of saving silently.
-- Behind its own data source switch, since commercial use needs HockeyStatCards' permission. Our computed Game Score is the fallback.
+### HockeyStatCards (dropped)
+- Dropped 2026-10-02 by Brian's decision. Everything on its cards can be built from NHL play-by-play and our xG model, so we compute our own Game Score instead (section 6). The `hockeystatcards` data source is switched off. Do not build Gmail or card-image ingestion.
 
 ### Sentiment sources
 - Reddit: r/hockey plus all 32 team subreddits, especially game threads and post-game threads (official API, OAuth).
@@ -138,7 +136,7 @@ Stats:
 - Play-by-play and shifts are NOT database tables (decided 2026-10-02 to keep Neon on the free plan). They are stored in R2 as one gzipped JSON file per game, at `nhl/pbp/{season}/{game_id}.json.gz` and `nhl/shifts/{season}/{game_id}.json.gz`. Python jobs read them to compute per-game results (on-ice metrics, xG, zone starts) and save only those results to Postgres.
 - `player_game_onice` (5v5 CF, CA, FF, FA, GF, GA, xGF, xGA, HDCF, HDCA, OZ starts, DZ starts)
 - `edge_player_stats` (player_id, season, as_of, oz_time_pct, dz_time_pct, top_speed, bursts_20plus, max_shot_speed)
-- `hsc_game_scores` (player_id, game_id, game_score, raw_fields jsonb, verified bool)
+- `player_game_score` (player_id, game_id, team_id, is_goalie, ev_offense, ev_defense, power_play, penalty_kill, finishing, playmaking, penalties, faceoffs, goaltending, game_score), our Game Score in goals above average
 
 Money and value: `contracts` (adds status active/bought_out/terminated, contract_type, source starting_file/news; unknown details are NULL), `contract_news` (headlines read), `contract_events` (transactions found and their outcome), `contract_changes` (every field changed, with sources), `player_value` (player_id, as_of, war_proj, market_aav_est, surplus)
 
@@ -173,7 +171,8 @@ All on-ice metrics are 5v5 unless stated. Per-60 = stat / TOI minutes x 60.
 - OZS% = offensive zone faceoff starts / (offensive + defensive zone starts).
 - ixG = sum of xG on the player's own shots. Goals above expected = G - ixG.
 - GSAx (goalies) = xG against - goals against.
-- Game Score (Luszczyszyn, verify coefficients before shipping): 0.75 G + 0.7 A1 + 0.55 A2 + 0.075 SOG + 0.05 BLK + 0.15 PD - 0.15 PT + 0.01 FOW - 0.01 FOL + 0.05 CF - 0.05 CA + 0.15 GF - 0.15 GA. Prefer HockeyStatCards' value when that source is enabled.
+- Game Score (ours, shown on the site): a player's impact on one game in goals above an average player with the same ice time, computed in `pipeline/metrics/game_score.py`. Parts: 0.2 x his on-ice 5v5 xGF and xGA against the league rate (offense and defense), the same for power play and penalty kill, finishing (goals - ixG), 0.5 x primary assists above the league rate for his ice time, 0.19 x (penalties drawn - taken) (0.19 goals per penalty was measured from our data), 0.01 x (faceoff wins - losses); goalies get goals saved above expected. xG uses the season adjustment. The 0.5 and 0.01 weights are starting values open to tuning.
+- Classic Game Score (Luszczyszyn 2016, coefficients verified 2026-10-02): 0.75 G + 0.7 A1 + 0.55 A2 + 0.075 SOG + 0.05 BLK + 0.15 PD - 0.15 PT + 0.01 FOW - 0.01 FOL + 0.05 CF - 0.05 CA + 0.15 GF - 0.15 GA, with 5v5 CF, CA, GF, GA; goalies -0.75 GA + 0.1 SV. Kept in the `skater_game_score` and `goalie_game_score` views for reference, not shown on the site.
 - Cap % = cap hit / cap ceiling for that season.
 - Age = computed from birth date as of today. Aging index from historical production by position and age.
 
@@ -238,7 +237,7 @@ Players, aliases, rosters, games, boxscores, play-by-play, shifts, EDGE. Nightly
 Done when: any team's roster page and any player's profile render real numbers that match NHL.com for spot-checked games.
 
 ### Phase 3: Advanced metrics
-On-ice metrics, per-60 rates, zone starts, relative stats, MoneyPuck xG, Game Score, HockeyStatCards email ingestion with cross-checks. Then our own xG model.
+On-ice metrics, per-60 rates, zone starts, relative stats, our own xG model (MoneyPuck was skipped to avoid its licensing question), and our own Game Score in goals above average (HockeyStatCards was dropped).
 
 ### Phase 4: Sentiment scoring
 Player matching, Claude scoring, daily aggregation, trade chatter, spikes, perception gap. Sentiment panels live on Profile and Roster. Rumor Tracker page.
