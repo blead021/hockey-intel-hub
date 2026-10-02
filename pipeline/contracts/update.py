@@ -46,6 +46,11 @@ def main(argv: list[str] | None = None) -> None:
 
     with job_run("contract_news") as counts, connect(autocommit=True) as conn, client() as http:
         require_enabled(conn, "contract_news")
+        # Wait for the starting contracts: updating first would make the starting import refuse to load.
+        if not conn.execute("select exists (select 1 from contracts where source = 'starting_file')").fetchone()[0]:
+            counts["waiting_for_starting_file"] = 1
+            print("contract news: waiting for the starting contracts (python -m pipeline.ingest.contracts). Nothing done.")
+            return
         news.collect(conn, http, counts)
         items = pending_news(conn)
         counts["news_to_read"] = len(items)
