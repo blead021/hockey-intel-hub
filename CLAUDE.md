@@ -128,8 +128,7 @@ Core: `teams`, `seasons`, `cap_limits`, `players`, `player_aliases`, `games`, `d
 Stats:
 - `game_skater_stats` (player_id, game_id, team_id, g, a1, a2, sog, hits, blocks, toi_sec, pp_toi_sec, pk_toi_sec, fow, fol, giveaways, takeaways, plus_minus)
 - `game_goalie_stats` (player_id, game_id, shots_against, saves, ga, toi_sec)
-- `pbp_events` (game_id, event_idx, period, time_sec, type, x, y, shooter_id, team_id, strength, zone, shot_type, xg)
-- `shifts` (game_id, player_id, period, start_sec, end_sec)
+- Play-by-play and shifts are NOT database tables (decided 2026-10-02 to keep Neon on the free plan). They are stored in R2 as one gzipped JSON file per game, at `nhl/pbp/{season}/{game_id}.json.gz` and `nhl/shifts/{season}/{game_id}.json.gz`. Python jobs read them to compute per-game results (on-ice metrics, xG, zone starts) and save only those results to Postgres.
 - `player_game_onice` (5v5 CF, CA, FF, FA, GF, GA, xGF, xGA, HDCF, HDCA, OZ starts, DZ starts)
 - `edge_player_stats` (player_id, season, as_of, oz_time_pct, dz_time_pct, top_speed, bursts_20plus, max_shot_speed)
 - `hsc_game_scores` (player_id, game_id, game_score, raw_fields jsonb, verified bool)

@@ -29,13 +29,18 @@ def archive_key(source: str, name: str, when: datetime) -> str:
 
 
 def save(source: str, name: str, payload) -> str | None:
-    """Stores payload as gzipped JSON and returns its key, or None when archiving is off locally."""
+    """Stores payload under a new timestamped key and returns it, or None when archiving is off locally."""
+    return put(archive_key(source, name, datetime.now(UTC)), payload)
+
+
+def put(key: str, payload) -> str | None:
+    """Stores payload at an exact key, replacing any earlier copy. Used for files read back later,
+    such as nhl/pbp/{season}/{game_id}.json.gz."""
     if not configured():
         if os.environ.get("ARCHIVE_REQUIRED") == "1":
             missing = [n for n in REQUIRED_VARS if not os.environ.get(n)]
             raise ArchiveUnavailable(f"R2 archive is required but these are not set: {', '.join(missing)}")
         return None
-    key = archive_key(source, name, datetime.now(UTC))
     body = gzip.compress(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
     _s3().put_object(
         Bucket=os.environ["R2_BUCKET_RAW"],

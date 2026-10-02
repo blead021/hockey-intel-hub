@@ -201,3 +201,13 @@ def test_long_item_ids_are_hashed_consistently():
     assert item_id(long_id).startswith("sha256:")
     assert len(item_id(long_id)) == 71
     assert item_id(long_id) == item_id(long_id)
+
+
+def test_parse_teams_picks_the_team_whose_name_matches_a_shared_code():
+    abbrevs = [f"T{i:02d}" for i in range(31)] + ["UTA"]
+    team_list = {"data": [{"id": i, "triCode": a, "fullName": a} for i, a in enumerate(abbrevs[:31])]
+                 + [{"id": 59, "triCode": "UTA", "fullName": "Utah Hockey Club"},
+                    {"id": 68, "triCode": "UTA", "fullName": "Utah Mammoth"}]}
+    standings = _standings(*abbrevs)
+    standings["standings"][-1]["teamName"]["default"] = "Utah Mammoth"
+    assert parse_teams(standings, team_list)[-1].id == 68
