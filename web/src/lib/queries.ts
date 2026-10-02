@@ -674,7 +674,8 @@ export async function getPlayerSentiment(sql: Sql, playerIds: number[]): Promise
     with latest as (select max(date) as d from sentiment_daily)
     select p.id as player_id, cur.score_0_100::float8 as fan_score,
            (cur.score_0_100 - old.score_0_100)::float8 as fan_trend,
-           coalesce(tc.chatter_7d, 0)::int as chatter_7d, coalesce(tc.spike, false) as spike
+           coalesce(tc.chatter_7d, 0)::int as chatter_7d,
+           coalesce(tc.spike, false) and latest.d - (select min(date) from sentiment_daily) >= 35 as spike
     from players p cross join latest
     left join sentiment_daily cur on cur.player_id = p.id and cur.audience = 'fan' and cur.date = latest.d
     left join sentiment_daily old on old.player_id = p.id and old.audience = 'fan' and old.date = latest.d - 14
@@ -763,6 +764,7 @@ export type Rumor = {
   player_id: number; name: string; position: string | null; team: string | null; age: number | null;
   cap_hit: number | null; end_season: number | null; expiry_status: string | null;
   chatter_7d: number; prior_7d: number; prior_weekly_avg: number; spike: boolean; daily: number[];
+  history_days: number;
   fans: number | null; beat: number | null; media: number | null; mentions: RumorMention[];
 };
 
@@ -779,7 +781,10 @@ export async function getRumors(sql: Sql, opts: { team?: string; group?: "F" | "
     select tc.player_id, p.first_name || ' ' || p.last_name as name, p.position, t.abbrev as team,
            date_part('year', age(p.birth_date))::int as age,
            c.cap_hit::float8 as cap_hit, c.end_season, c.expiry_status,
-           tc.chatter_7d::int as chatter_7d, tc.prior_weekly_avg::float8 as prior_weekly_avg, tc.spike,
+           tc.chatter_7d::int as chatter_7d, tc.prior_weekly_avg::float8 as prior_weekly_avg,
+           -- A spike compares with the 4 weeks before, so it needs 35 days of history to mean anything.
+           tc.spike and latest.d - (select min(date) from sentiment_daily) >= 35 as spike,
+           (latest.d - (select min(date) from sentiment_daily))::int as history_days,
            (select coalesce(sum(n), 0) from daily x, latest where x.player_id = tc.player_id
               and x.date <= latest.d - 7)::int as prior_7d,
            (select json_agg(coalesce(x.n, 0) order by s.day) from latest,

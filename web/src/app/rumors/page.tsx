@@ -81,7 +81,8 @@ export default async function RumorsPage({ searchParams }: PageProps<"/rumors">)
 
       <p className="text-xs text-muted">
         Chatter = trade-related mentions in the last 7 days across Bluesky, YouTube, and news headlines. Rising or fading
-        compares the last 7 days with the 7 before. Summaries are written by us; follow the links for the original
+        compares the last 7 days with the 7 before and appears after 14 days of history; a spike (twice the usual weekly
+        level) appears after 35 days. Summaries are written by us; follow the links for the original
         sources.
       </p>
     </main>
@@ -89,7 +90,8 @@ export default async function RumorsPage({ searchParams }: PageProps<"/rumors">)
 }
 
 function RumorCard({ r }: { r: Rumor }) {
-  const rising = r.chatter_7d > r.prior_7d;
+  // Rising or fading compares two weeks, so it needs 14 days of history.
+  const trend = r.history_days < 14 ? null : r.chatter_7d > r.prior_7d ? "rising" : "fading";
   const top = Math.max(...r.daily, 1);
   return (
     <section className="grid gap-4 rounded-lg border border-border bg-surface p-5 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_minmax(0,18rem)]">
@@ -106,9 +108,11 @@ function RumorCard({ r }: { r: Rumor }) {
           </p>
         )}
         <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
-          <span className={`rounded-full px-2 py-1 ${rising ? "bg-negative-soft text-negative" : "bg-border-soft text-muted"}`}>
-            {rising ? "▲ Rising" : "▼ Fading"}
-          </span>
+          {trend && (
+            <span className={`rounded-full px-2 py-1 ${trend === "rising" ? "bg-negative-soft text-negative" : "bg-border-soft text-muted"}`}>
+              {trend === "rising" ? "▲ Rising" : "▼ Fading"}
+            </span>
+          )}
           {r.spike && <span className="rounded-full bg-negative-soft px-2 py-1 text-negative">Spike</span>}
         </div>
       </div>
@@ -116,7 +120,9 @@ function RumorCard({ r }: { r: Rumor }) {
       <div>
         <div className="flex items-baseline justify-between">
           <p className="text-sm font-semibold">Trade chatter, last 14 days</p>
-          <p className="font-mono text-sm text-negative">{r.prior_7d} → {r.chatter_7d} per week</p>
+          <p className="font-mono text-sm text-negative">
+            {r.history_days >= 14 ? `${r.prior_7d} → ${r.chatter_7d} per week` : `${r.chatter_7d} this week`}
+          </p>
         </div>
         <div className="mt-2 flex h-14 items-end gap-1" aria-label={`Daily trade mentions: ${r.daily.join(", ")}`}>
           {r.daily.map((n, i) => (
