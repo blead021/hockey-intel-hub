@@ -93,6 +93,16 @@ def match_player(conn, name: str, team_codes: list[str]) -> int | None:
     ).fetchall()
     if len(rows) > 1:
         rows = [r for r in rows if r[1] in team_codes] or rows
+    if not rows and " " not in name.strip() and team_codes:
+        # Headlines often give only a surname ("Markstrom traded to Florida"). Accept it when exactly one
+        # player with that surname is tied to a team in the story, on its roster or under contract.
+        rows = conn.execute(
+            """select distinct p.id, null from players p
+               left join contracts c on c.player_id = p.id and c.status = 'active'
+               join teams t on t.id in (p.current_team_id, p.rights_team_id, c.team_id)
+               where lower(p.last_name) = lower(%s) and t.abbrev = any(%s)""",
+            (name.strip(), team_codes),
+        ).fetchall()
     return rows[0][0] if len(rows) == 1 else None
 
 

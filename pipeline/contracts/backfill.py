@@ -218,12 +218,32 @@ def release(conn) -> None:
     print(f"{n} headlines handed to the contracts job (python -m pipeline.contracts.update --backfill --max {n}).")
 
 
+def reapply_unmatched(conn, counts) -> None:
+    """Re-applies backfill events skipped because the player could not be matched, from the details Claude
+    already extracted (no new Claude cost), under the same backfill rules. Run after improving matching."""
+    from pipeline.contracts.apply import Applier
+
+    teams = dict(conn.execute("select abbrev, id from teams where active").fetchall())
+    applier = Applier(conn, None, "reapply", teams, create_only=True)
+    rows = conn.execute(
+        """select e.id, e.details, e.news_ids, e.source_urls from contract_events e
+           where e.outcome = 'skipped_unmatched' and exists (
+             select 1 from contract_news n where n.id = any(e.news_ids) and n.query like 'backfill%%')"""
+    ).fetchall()
+    for event_id, details, news_ids, urls in rows:
+        news = [{"id": i, "url": u} for i, u in zip(news_ids, urls or [None] * len(news_ids))]
+        outcome = applier.apply(details, news)
+        conn.execute("update contract_events set outcome = 'skipped_unmatched_retried' where id = %s", (event_id,))
+        counts[f"reapplied_{outcome}"] += 1
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Backfill contracts for players missing from the starting file")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--search", action="store_true")
     mode.add_argument("--teams", help="comma-separated team codes short of contracts, for example PHI,COL")
     mode.add_argument("--check", action="store_true", help="offseason transactions and flagged players (free)")
+    mode.add_argument("--reapply", action="store_true", help="retry unmatched backfill events without Claude")
     mode.add_argument("--estimate", action="store_true")
     mode.add_argument("--release", action="store_true")
     args = parser.parse_args(argv)
@@ -240,6 +260,11 @@ def main(argv: list[str] | None = None) -> None:
             search_offseason(conn, http, counts)
             check_players(conn, http, counts)
             print(f"check search ok: {dict(counts)}")
+    if args.reapply:
+        with job_run("contract_backfill_reapply") as counts, connect(autocommit=True) as conn:
+            reapply_unmatched(conn, counts)
+            print(f"reapply ok: {dict(counts)}")
+        return
     with connect(autocommit=True) as conn:
         if args.release:
             release(conn)

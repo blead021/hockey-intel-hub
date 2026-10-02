@@ -50,7 +50,8 @@ em dashes (use commas).
 - strengths: 2 or 3 one-line strengths, each tied to a number given.
 - watch_outs: 1 to 3 one-line weaknesses, each tied to a number given. If nothing is below the 40th
   percentile, give the lowest trait gently.
-Zone entries is an estimate; say "rush chances" rather than claiming tracked zone entries."""
+Zone entries is an estimate from rush chances: call it "rush chances" and never "zone entries" or "entries".
+Keep each strength and watch-out under 15 words."""
 
 OUTPUT_SCHEMA = {
     "type": "object",
