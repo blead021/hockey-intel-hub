@@ -32,6 +32,8 @@ def setup(conn):
            where p.position = 'C' and t.active order by p.id limit 1"""
     ).fetchone()
     other = next(code for code in teams if code != team)
+    # Start from a known state; real contracts for this player come back when the transaction rolls back.
+    conn.execute("delete from contracts where player_id = %s", (player_id,))
     conn.execute(
         """insert into contracts (player_id, player_name, team_id, cap_hit, start_season, end_season, expiry_status,
                clause, retained_pct, status, source)
