@@ -7,10 +7,12 @@ import { withDb } from "@/lib/db";
 import { faceoffPct, money, num, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
 import {
   getCapCeiling,
+  getContractCount,
   getEnabledSources,
   getExpiring,
   getLoadedSeasons,
   getPlayerSentiment,
+  getReserveList,
   getRetainedCharges,
   getRosterGoalies,
   getRosterSkaters,
@@ -19,6 +21,7 @@ import {
   getTeams,
   getTeamSummary,
   type PlayerSentiment,
+  type ReservePlayer,
   type RetainedCharge,
   type RosterGoalie,
   type RosterSkater,
@@ -60,7 +63,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -71,12 +74,14 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       getExpiring(sql, team.id, season),
       getTeamChatter(sql, team.id),
       getRetainedCharges(sql, team.id, season),
+      isCurrent ? getReserveList(sql, team.id, season) : Promise.resolve([]),
+      getContractCount(sql, team.id, season),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -111,7 +116,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
           value={hasContracts && ceiling ? money(ceiling - capCommitted) : "—"}
           detail={`Retained slots used: ${retained.length} of ${MAX_RETAINED}`}
         />
-        <StatCard label="Active roster" value={skaters.length + goalies.length} detail={isCurrent ? "on the current roster" : "played this season"} />
+        <StatCard label="Active roster" value={skaters.length + goalies.length} detail={showContracts && isCurrent ? `${contractCount} of 50 NHL contracts` : isCurrent ? "on the current roster" : "played this season"} />
         <StatCard label="5v5 xGF%" value={pct1(summary?.xgf_pct)} detail={summary?.xgf_rank ? `${ordinal(summary.xgf_rank)} in NHL` : undefined} />
         <StatCard
           label="PP% / PK%"
@@ -182,6 +187,8 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
           Fans = fan sentiment 0-100 with 14-day trend. Chatter = trade mentions in the last 7 days.
         </p>
       </div>
+
+      {showContracts && isCurrent && <ReserveList rows={reserve} season={season} />}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         {showContracts && <CapByPosition forwards={capOf(forwards)} defense={capOf(defense)} goalies={capOf(goalies)} retained={retained} />}
@@ -374,5 +381,52 @@ function MostChatter({ rows }: { rows: Awaited<ReturnType<typeof getTeamChatter>
         </ul>
       )}
     </Panel>
+  );
+}
+
+const CONTRACT_TYPES: Record<string, string> = { entry_level: "ELC", standard: "Standard", extension: "Extension" };
+
+function ReserveList({ rows, season }: { rows: ReservePlayer[]; season: number }) {
+  return (
+    <section className="mt-6 overflow-x-auto rounded-lg border border-border bg-surface px-4 pb-4">
+      <h2 className="mt-4 font-heading text-2xl font-semibold uppercase tracking-tight">
+        Reserve list{" "}
+        <span className="font-sans text-sm font-normal normal-case tracking-normal text-muted">
+          under NHL contract, not on the NHL roster · {rows.length} players
+        </span>
+      </h2>
+      {rows.length === 0 ? (
+        <p className="mt-2 text-sm text-muted">No contracted players outside the NHL roster on file.</p>
+      ) : (
+        <table className="mt-2 w-full min-w-max border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
+              <th className="py-3 pr-3 text-left">Player</th>
+              {["Pos", "Age", "Cap hit", "Yrs", "Expiry", "Type"].map((h) => (
+                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Type" ? "text-left" : "text-right"}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.name}-${r.end_season}`} className="border-b border-border-soft">
+                <td className="py-2 pr-3 text-left">
+                  {r.player_id ? <Link href={`/player/${r.player_id}`} className="font-semibold hover:underline">{r.name}</Link> : <span className="font-semibold">{r.name}</span>}
+                </td>
+                <td className="px-2 py-2 text-right">{r.position ?? "—"}</td>
+                <td className="px-2 py-2 text-right font-mono">{num(r.age)}</td>
+                <td className="px-2 py-2 text-right font-mono">{r.cap_hit == null ? "unknown" : money(r.cap_hit)}</td>
+                <td className="px-2 py-2 text-right font-mono">{yearsLeft(r.end_season, season)}</td>
+                <td className="px-2 py-2 text-left font-mono">{r.expiry_status ?? "—"}</td>
+                <td className="px-2 py-2 text-left">{r.contract_type ? CONTRACT_TYPES[r.contract_type] ?? r.contract_type : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="mt-3 text-xs text-muted">
+        Prospects and depth players signed to NHL contracts, including two-way deals. Players on AHL-only contracts are not listed.
+      </p>
+    </section>
   );
 }

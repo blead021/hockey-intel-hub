@@ -11,6 +11,9 @@ on:
         description: "Only print what Claude finds; change no contracts"
         type: boolean
         default: false
+      max:
+        description: "Most headlines to process (blank = 200)"
+        required: false
 
 concurrency:
   group: contracts
@@ -35,4 +38,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -e .
-      - run: python -m pipeline.contracts.update ${{ inputs.dry_run && '--dry-run' || '' }}
+      - run: python -m pipeline.contracts.update ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.max && format('--max {0}', inputs.max) || '' }}

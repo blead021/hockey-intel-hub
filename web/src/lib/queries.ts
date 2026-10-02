@@ -712,3 +712,28 @@ export async function getRetainedCharges(sql: Sql, teamId: number, season: numbe
       and ${season} between c.start_season and c.end_season
     order by charge desc`;
 }
+
+export type ReservePlayer = {
+  player_id: number | null; name: string; position: string | null; age: number | null;
+  cap_hit: number | null; end_season: number | null; expiry_status: string | null; contract_type: string | null;
+};
+
+// Players this team has under NHL contract who are not on its NHL roster (AHL, juniors, Europe, injured reserve).
+export async function getReserveList(sql: Sql, teamId: number, season: number): Promise<ReservePlayer[]> {
+  return sql<ReservePlayer[]>`
+    select c.player_id, coalesce(p.first_name || ' ' || p.last_name, c.player_name) as name, p.position,
+           date_part('year', age(p.birth_date))::int as age, c.cap_hit::float8 as cap_hit, c.end_season,
+           c.expiry_status, c.contract_type
+    from contracts c left join players p on p.id = c.player_id
+    where c.team_id = ${teamId} and c.status = 'active' and ${season} between c.start_season and c.end_season
+      and (p.id is null or p.current_team_id is distinct from ${teamId})
+    order by c.cap_hit desc nulls last, name`;
+}
+
+// NHL contracts this team holds this season, against the league limit of 50.
+export async function getContractCount(sql: Sql, teamId: number, season: number): Promise<number> {
+  const [row] = await sql<{ n: number }[]>`
+    select count(*)::int as n from contracts
+    where team_id = ${teamId} and status = 'active' and ${season} between start_season and end_season`;
+  return row?.n ?? 0;
+}

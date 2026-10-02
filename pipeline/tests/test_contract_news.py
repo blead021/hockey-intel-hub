@@ -111,3 +111,13 @@ def test_refusal_returns_no_transactions():
 
     result = ex.extract(SimpleNamespace(beta=SimpleNamespace(messages=Refuse())), [{"title": "t"}], {})
     assert result.transactions == [] and result.stop_reason == "refusal"
+
+
+def test_backfill_headline_must_name_the_player():
+    from pipeline.contracts.backfill import mentions_player
+
+    assert mentions_player("Ducks sign Cutter Gauthier to eight-year extension", "Cutter Gauthier")
+    assert mentions_player("Blue Jackets sign C. Gauthier", "Cutter Gauthier")
+    assert not mentions_player("Ducks sign Gauthier", "Cutter Gauthier")
+    assert not mentions_player("Flyers sign Julien Gauthier", "Cutter Gauthier")
+    assert mentions_player("Canadiens sign Ivan Demidov to entry-level deal", "Ivan Demidov")

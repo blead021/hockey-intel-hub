@@ -86,6 +86,7 @@ def main(argv: list[str] | None = None) -> None:
 
         if not backfill:
             nhl_players.refresh_rosters(conn, http, counts)
+            nhl_players.refresh_prospects(conn, http, counts)
         nhl_players.fill_missing_bios(conn, http, counts)
 
         if pending and len(failed) / len(pending) > MAX_FAILURE_RATE:

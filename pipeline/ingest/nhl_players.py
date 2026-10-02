@@ -68,6 +68,24 @@ def refresh_rosters(conn, http, counts) -> None:
         ).rowcount
 
 
+def refresh_prospects(conn, http, counts) -> None:
+    """Loads each team's prospect list (players whose NHL rights a team holds, outside its NHL roster) and
+    records the team in rights_team_id. Anyone no longer listed has rights_team_id cleared."""
+    teams = conn.execute("select id, abbrev from teams where active order by abbrev").fetchall()
+    listed: set[int] = set()
+    for team_id, abbrev in teams:
+        players = nhl.parse_roster(nhl.get_json(http, f"{nhl.WEB}/prospects/{abbrev}"), team_id)
+        with conn.transaction():
+            upsert_players(conn, players)
+            conn.execute("update players set rights_team_id = %s where id = any(%s)", (team_id, [p.id for p in players]))
+        listed |= {p.id for p in players}
+        counts["prospects"] += len(players)
+    with conn.transaction():
+        conn.execute(
+            "update players set rights_team_id = null where rights_team_id is not null and id <> all(%s)", (list(listed),)
+        )
+
+
 def fill_missing_bios(conn, http, counts, limit: int = 500) -> None:
     """Players first seen in old games have no birth date or size yet; fetch their profile pages."""
     ids = [r[0] for r in conn.execute("select id from players where birth_date is null order by id limit %s", (limit,))]

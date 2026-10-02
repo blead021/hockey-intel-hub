@@ -23,11 +23,11 @@ from pipeline.sources import require_enabled
 MAX_ITEMS_PER_RUN = 200
 
 
-def pending_news(conn) -> list[dict]:
+def pending_news(conn, limit: int = MAX_ITEMS_PER_RUN) -> list[dict]:
     cur = conn.execute(
         """select id, title, outlet, url, published_at from contract_news
            where status in ('pending', 'failed') order by published_at nulls last, id limit %s""",
-        (MAX_ITEMS_PER_RUN,),
+        (limit,),
     )
     cols = [d.name for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description="Keep contracts current from news")
     parser.add_argument("--dry-run", action="store_true", help="print what Claude extracts; change no contracts")
+    parser.add_argument("--max", type=int, default=MAX_ITEMS_PER_RUN, help="most headlines to process this run")
     args = parser.parse_args(argv)
 
     with job_run("contract_news") as counts, connect(autocommit=True) as conn, client() as http:
@@ -52,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
             print("contract news: waiting for the starting contracts (python -m pipeline.ingest.contracts). Nothing done.")
             return
         news.collect(conn, http, counts)
-        items = pending_news(conn)
+        items = pending_news(conn, args.max)
         counts["news_to_read"] = len(items)
         if not items:
             print(f"contract news: nothing new. {dict(counts)}")
