@@ -71,7 +71,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
   ].filter(Boolean);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-4 py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         {player.headshot_url && (
           // NHL headshots are served as-is; Cloudflare image optimization is off to avoid its fees.

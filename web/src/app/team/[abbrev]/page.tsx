@@ -55,7 +55,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
   const pickerSeasons = [...new Set([current, ...seasons])].sort((a, b) => b - a);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-4 py-8">
       <PageTitle eyebrow={[team.conference, team.division].filter(Boolean).join(" · ")} title={team.name}>
         <SeasonPicker seasons={pickerSeasons} current={season} hrefFor={(s) => `/team/${team.abbrev}?season=${s}`} />
       </PageTitle>

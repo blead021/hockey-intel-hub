@@ -1,23 +1,5 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { SITE_NAME } from "@/lib/site";
-
-export function SiteHeader() {
-  return (
-    <header className="border-b border-border bg-surface">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-        <Link href="/" className="font-heading text-xl font-bold uppercase tracking-tight">
-          {SITE_NAME}
-        </Link>
-        <nav className="flex gap-4 text-sm font-medium">
-          <Link href="/teams" className="text-muted hover:text-ink">
-            Teams
-          </Link>
-        </nav>
-      </div>
-    </header>
-  );
-}
 
 export function PageTitle({ eyebrow, title, children }: { eyebrow?: ReactNode; title: ReactNode; children?: ReactNode }) {
   return (

@@ -16,7 +16,7 @@ export default async function TeamsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
+    <main className="mx-auto max-w-7xl px-4 py-8">
       <PageTitle title="Teams" />
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {[...divisions.entries()].sort().map(([key, list]) => {

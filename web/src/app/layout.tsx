@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { SiteHeader } from "@/components/ui";
+import { SiteNav } from "@/components/nav";
 import { SITE_NAME } from "@/lib/site";
 import "./globals.css";
 
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     // to <html> and <body> before React loads. It applies to those two tags only, not their children.
     <html lang="en" className={`${heading.variable} ${body.variable} ${mono.variable}`} suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <SiteHeader />
+        <SiteNav />
         {children}
       </body>
     </html>
