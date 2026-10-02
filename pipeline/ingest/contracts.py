@@ -281,6 +281,7 @@ def match_players(conn, rows: list[ContractRow]) -> dict[int, int | None]:
             surname_fits = [
                 (pid, team) for pid, first, last, team, _ in roster
                 if team == r.team and normalize(last).split(" ")[-1] in wanted[1:]
+                and normalize(first)[:1] == wanted[0][:1]   # David Edstrom is not Adam Edstrom
             ]
             candidates = surname_fits if len(surname_fits) == 1 else []
         if not candidates:
@@ -330,6 +331,20 @@ def lookup_unmatched(conn, http, rows: list[ContractRow], matches: dict[int, int
             )
         matches[r.line] = player_id
         counts["players_added_from_search"] += 1
+
+
+def set_extension_starts(conn) -> int:
+    """A player with two active contracts where the later one has no start season: the later one is an
+    extension, so it starts the season after the earlier one ends (arithmetic on stated end seasons)."""
+    return conn.execute(
+        """update contracts later set start_season = earlier.end_season + 10001
+           from contracts earlier
+           where later.player_id = earlier.player_id and later.id <> earlier.id
+             and later.status = 'active' and earlier.status = 'active'
+             and later.start_season is null and earlier.end_season < later.end_season
+             and not exists (select 1 from contracts mid where mid.player_id = later.player_id and mid.status = 'active'
+                             and mid.end_season > earlier.end_season and mid.end_season < later.end_season)"""
+    ).rowcount
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -417,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
                         for r in good
                     ],
                 )
+        counts["extension_starts_set"] = set_extension_starts(conn)
         counts["rows_loaded"] = len(good)
         counts["rows_with_problems"] = len({line for line, _, _ in result.problems})
         counts["unmatched_players"] = len(unmatched)
