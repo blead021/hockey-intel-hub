@@ -294,6 +294,14 @@ export type SkaterGame = {
   fow: number;
   fol: number;
   game_score: number | null;
+  hits: number;
+  blocks: number;
+  pp_toi_sec: number | null;
+  pk_toi_sec: number | null;
+  giveaways: number;
+  takeaways: number;
+  oz_starts: number | null;
+  dz_starts: number | null;
 };
 
 export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) {
@@ -306,10 +314,12 @@ export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) 
              when g.last_period_type = 'REG' then 'L' else 'OTL'
            end || ' ' || greatest(g.home_score, g.away_score) || '-' || least(g.home_score, g.away_score) as result,
            s.g, (s.a1 + s.a2) as a, (s.g + s.a1 + s.a2) as pts, s.plus_minus, s.sog, s.toi_sec, s.fow, s.fol,
+           s.hits, s.blocks, s.pp_toi_sec, s.pk_toi_sec, s.giveaways, s.takeaways, o.oz_starts, o.dz_starts,
            gs.game_score::float8 as game_score
     from game_skater_stats s
     join games g on g.id = s.game_id
     left join player_game_score gs on gs.player_id = s.player_id and gs.game_id = s.game_id
+    left join player_game_onice o on o.player_id = s.player_id and o.game_id = s.game_id
     join teams home on home.id = g.home_team_id
     join teams away on away.id = g.away_team_id
     where s.player_id = ${playerId}
@@ -736,4 +746,14 @@ export async function getContractCount(sql: Sql, teamId: number, season: number)
     select count(*)::int as n from contracts
     where team_id = ${teamId} and status = 'active' and ${season} between coalesce(start_season, 0) and end_season`;
   return row?.n ?? 0;
+}
+
+// 5v5 xGF% for each regular season, for "this season vs. last" on the profile.
+export async function getXgfBySeason(sql: Sql, playerId: number): Promise<Map<number, number>> {
+  const rows = await sql<{ season_id: number; xgf_pct: number }[]>`
+    select g.season_id, (sum(o.xgf) / nullif(sum(o.xgf) + sum(o.xga), 0))::float8 as xgf_pct
+    from player_game_onice o join games g on g.id = o.game_id
+    where o.player_id = ${playerId} and g.game_type = 2 and o.xgf is not null
+    group by g.season_id`;
+  return new Map(rows.filter((r) => r.xgf_pct != null).map((r) => [r.season_id, r.xgf_pct]));
 }

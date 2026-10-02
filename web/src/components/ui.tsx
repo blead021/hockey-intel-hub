@@ -93,3 +93,16 @@ export function SeasonPicker({ seasons, current, hrefFor }: { seasons: number[];
     </div>
   );
 }
+
+// A white card with an uppercase heading, as used for each section in the Design/ screenshots.
+export function Panel({ title, note, children, className = "" }: { title: ReactNode; note?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={`rounded-lg border border-border bg-surface p-5 ${className}`}>
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="font-heading text-2xl font-semibold uppercase tracking-tight">{title}</h2>
+        {note && <p className="text-xs text-muted">{note}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}

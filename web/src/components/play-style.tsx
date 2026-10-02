@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { SectionTitle, Unavailable } from "@/components/ui";
+import { Panel, Unavailable } from "@/components/ui";
 import { season as seasonLabel } from "@/lib/format";
 import type { PlayStyle } from "@/lib/queries";
 
@@ -14,10 +14,9 @@ function ordinal(n: number): string {
 export function PlayStyleSection({ style }: { style: PlayStyle | undefined }) {
   if (!style) {
     return (
-      <>
-        <SectionTitle>Play style</SectionTitle>
+      <Panel title="Play style">
         <Unavailable>Play style appears after 100 minutes of ice time in a season.</Unavailable>
-      </>
+      </Panel>
     );
   }
   const group = GROUP_NAMES[style.group];
@@ -34,8 +33,9 @@ export function PlayStyleSection({ style }: { style: PlayStyle | undefined }) {
   const share = (n: number) => (style.shots.total ? Math.round((n / style.shots.total) * 100) : 0);
 
   return (
-    <>
-      <SectionTitle note={`Trait percentiles vs. NHL ${group} · ${seasonLabel(style.season_id)}`}>
+    <Panel
+      note={`Trait percentiles vs. NHL ${group} · ${seasonLabel(style.season_id)}`}
+      title={
         <span className="inline-flex flex-wrap items-center gap-3">
           Play style
           {style.writeup?.archetype && (
@@ -44,8 +44,9 @@ export function PlayStyleSection({ style }: { style: PlayStyle | undefined }) {
             </span>
           )}
         </span>
-      </SectionTitle>
-      <div className="rounded-lg border border-border bg-surface p-4">
+      }
+    >
+      <div>
         {style.writeup?.summary && <p className="mb-3">{style.writeup.summary}</p>}
         {style.writeup && style.writeup.tags.length > 0 && (
           <div className="mb-4 flex flex-wrap gap-2">
@@ -131,6 +132,6 @@ export function PlayStyleSection({ style }: { style: PlayStyle | undefined }) {
           {!style.writeup && " A written scouting summary appears once Claude play-style writing is switched on."}
         </p>
       </div>
-    </>
+    </Panel>
   );
 }
