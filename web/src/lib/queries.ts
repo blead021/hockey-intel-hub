@@ -757,3 +757,51 @@ export async function getXgfBySeason(sql: Sql, playerId: number): Promise<Map<nu
     group by g.season_id`;
   return new Map(rows.filter((r) => r.xgf_pct != null).map((r) => [r.season_id, r.xgf_pct]));
 }
+
+export type RumorMention = { summary: string; url: string | null; source: string; audience: string; posted_at: string };
+export type Rumor = {
+  player_id: number; name: string; position: string | null; team: string | null; age: number | null;
+  cap_hit: number | null; end_season: number | null; expiry_status: string | null;
+  chatter_7d: number; prior_7d: number; prior_weekly_avg: number; spike: boolean; daily: number[];
+  fans: number | null; beat: number | null; media: number | null; mentions: RumorMention[];
+};
+
+// League-wide trade chatter (CLAUDE.md section 7, Rumor Tracker): players with trade mentions in the last
+// 7 days, most first, with the 14-day daily count, sentiment by audience, and our latest one-line summaries.
+export async function getRumors(sql: Sql, opts: { team?: string; group?: "F" | "D" | "G" }): Promise<Rumor[]> {
+  const team = opts.team ?? null;
+  const group = opts.group ?? null;
+  return sql<Rumor[]>`
+    with latest as (select max(date) as d from sentiment_daily),
+    daily as (
+      select player_id, date, sum(trade_mentions)::int as n from sentiment_daily, latest
+      where audience <> 'all' and date > latest.d - 14 group by player_id, date)
+    select tc.player_id, p.first_name || ' ' || p.last_name as name, p.position, t.abbrev as team,
+           date_part('year', age(p.birth_date))::int as age,
+           c.cap_hit::float8 as cap_hit, c.end_season, c.expiry_status,
+           tc.chatter_7d::int as chatter_7d, tc.prior_weekly_avg::float8 as prior_weekly_avg, tc.spike,
+           (select coalesce(sum(n), 0) from daily x, latest where x.player_id = tc.player_id
+              and x.date <= latest.d - 7)::int as prior_7d,
+           (select json_agg(coalesce(x.n, 0) order by s.day) from latest,
+              generate_series(latest.d - 13, latest.d, interval '1 day') as s(day)
+              left join daily x on x.player_id = tc.player_id and x.date = s.day::date) as daily,
+           (select score_0_100::float8 from sentiment_daily s, latest where s.player_id = tc.player_id and s.date = latest.d and s.audience = 'fan') as fans,
+           (select score_0_100::float8 from sentiment_daily s, latest where s.player_id = tc.player_id and s.date = latest.d and s.audience = 'beat_writer') as beat,
+           (select score_0_100::float8 from sentiment_daily s, latest where s.player_id = tc.player_id and s.date = latest.d and s.audience = 'media') as media,
+           coalesce((select json_agg(m order by m.posted_at desc) from (
+              select mp.summary, mm.url, mm.source, mm.audience, to_char(mm.posted_at, 'YYYY-MM-DD') as posted_at
+              from mention_players mp join mentions mm on mm.id = mp.mention_id
+              where mp.player_id = tc.player_id and mp.is_trade_related and mp.summary is not null
+              order by mm.posted_at desc limit 3) m), '[]') as mentions
+    from trade_chatter tc cross join latest
+    join players p on p.id = tc.player_id
+    left join teams t on t.id = p.current_team_id
+    left join lateral (
+      select cap_hit, end_season, expiry_status from contracts
+      where player_id = p.id and status = 'active' order by end_season desc limit 1) c on true
+    where tc.date = latest.d and tc.chatter_7d > 0
+      and (${team}::text is null or t.abbrev = ${team})
+      and (${group}::text is null or (case when p.position = 'D' then 'D' when p.position = 'G' then 'G' else 'F' end) = ${group})
+    order by tc.chatter_7d desc, name
+    limit 100`;
+}

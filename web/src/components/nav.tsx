@@ -4,13 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SITE_NAME } from "@/lib/site";
 
-// The five core screens from the Design/ screenshots. Screens not built yet are shown but not linked.
+// The five core screens from the Design/ screenshots plus the Rumor Tracker. Screens not built yet are shown but not linked.
 const TABS: { label: string; href: string | null; match: (path: string) => boolean }[] = [
   { label: "League", href: null, match: (p) => p.startsWith("/league") },
   { label: "Team Roster", href: "/teams", match: (p) => p.startsWith("/team") },
   { label: "Player Profile", href: null, match: (p) => p.startsWith("/player") },
   { label: "Trade Targets", href: null, match: (p) => p.startsWith("/trade-targets") },
   { label: "Trade Builder", href: null, match: (p) => p.startsWith("/trade-builder") },
+  { label: "Rumor Tracker", href: "/rumors", match: (p) => p.startsWith("/rumors") },
 ];
 
 export function SiteNav() {
