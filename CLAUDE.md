@@ -201,6 +201,24 @@ Estimate market AAV with a comparables model (nearest neighbors on age, position
 ### Team need grades
 Categories: goal scoring, playmaking, physicality, 5v5 defense, power play, penalty kill, goaltending, prospect depth. Compute each team's metric, z-score across 32 teams, map to grades -2 (Need), -1 (Thin), 0 (Average), 1 (Solid), 2 (Surplus). Document the metric used for each category.
 
+### Perception gap and "Undervalued on this roster"
+- Perception gap = performance percentile - fan sentiment score (both 0-100). Performance percentile blends, by position, xGF%, WAR, and Game Score percentiles. Until WAR exists (Phase 5), the blend uses xGF% and Game Score only, and pages say so.
+- Team Roster "Undervalued on this roster": the team's top 4 players by perception gap, each with fan sentiment, performance percentile, surplus value, and a one-line reason written by Claude from the player's numbers (stored, refreshed daily, never copied from mentions).
+
+### Play style (Player Profile)
+Season to date, percentiles versus the same position group (centers, wingers, defensemen) among players with at least 100 minutes of total ice time. All traits come from NHL play-by-play, shift data, boxscores, and NHL EDGE; nothing comes from manual tracking.
+- Shooting volume: individual unblocked shot attempts (shots on goal + missed shots) per 60, all strengths.
+- Playmaking: primary assists per 60, all strengths.
+- Zone entries (ESTIMATE until tracking data is added): rush shot attempts he took or was on the ice for, per 60 at 5v5. A rush attempt is an unblocked shot within 4 seconds of an event in the neutral or defensive zone (the xG model's rush flag). Pages label this trait as an estimate.
+- Forechecking: his hits and takeaways in the offensive zone, per 60.
+- Physicality: hits per 60 plus blocked shots per 60, all strengths.
+- Defensive impact: 5v5 on-ice xG against per 60 relative to his team when he is off the ice (lower is better, so the percentile is inverted).
+- Puck management: (takeaways - giveaways) per 60.
+- Speed: average of the NHL EDGE top-speed percentile and his 20+ mph bursts per game percentile.
+- Shot location split: share of his unblocked shots from the slot (within 25 feet of the net and within 20 feet of the middle), mid-range (within 45 feet, outside the slot), and perimeter (everything farther out).
+- Similar style: the 2 players at the same position whose trait percentile vectors are closest (Euclidean distance), current season.
+- Archetype label, scouting summary, style tags, strengths, and watch-outs: written by Claude from the trait percentiles and season stats only (stored per player, refreshed weekly). The summary describes the numbers in plain English and never invents facts not in them.
+
 ### Best fits
 Teams graded Need or Thin in the player's strength category, with cap space >= cap hit x 0.5 (the 50% retention limit), excluding his current team, sorted by need severity then cap space.
 
@@ -208,11 +226,11 @@ Teams graded Need or Thin in the player's strength category, with cap space >= c
 
 ## 7. Screens
 
-The approved mockups are the design source of truth for the five core screens. Match their layout and content.
+The screenshots in `Design/` (repo root) are the visual reference for the five core screens: `1-PuckSleuth-League.png`, `2-PuckSleuth-Team-Roster (2).png`, `3-PuckSleuth-Player-Profile (1).png`, `4-PuckSleuth-Trade-Targets.png`, `5-PuckSleuth-Trade-Builder.png`. Match their layout and content closely: dark top bar with PUCKSLEUTH and the five screen tabs, large uppercase headings, summary stat cards, dense tables with monospace numbers, and blue/orange for good/bad. Their names and numbers are illustrative sample data. Where a screenshot shows something we decided against, follow the decision: Game Score is our own (not HockeyStatCards), and Reddit is off.
 
 1. League (free): 32-team needs grid with cap space, summary cards, Top 10 trade targets with best fits, Top 10 undervalued by perception gap. Conference filter.
-2. Team Roster (free for the user's favorite team as "My Team", paid for all others): team selector, summary cards (cap committed, space, roster count, 5v5 xGF%, PP/PK, fan sentiment), forwards and defense table (GP, G, A, P, TOI, FO% for centers, xGF%, WAR, cap hit, years, expiry, clause, fan sentiment, chatter), goalie table (SV%, GAA, GSAx), cap by position, expiring contracts, most trade chatter.
-3. Player Profile (paid; free for players on My Team): header with contract, clause, surplus value; stat cards including Faceoff %; last-5 game log including FO won-lost; advanced metrics with percentile bars; sentiment by audience with 14-day chatter chart, signals, latest mentions; age curve; NHL EDGE skating.
+2. Team Roster (free for the user's favorite team as "My Team", paid for all others): team selector, summary cards (cap committed, space, roster count, 5v5 xGF%, PP/PK, fan sentiment), an "Undervalued on this roster" section (section 6), forwards and defense table (GP, G, A, P, TOI, FO% for centers, xGF%, WAR, cap hit, years, expiry, clause, fan sentiment, chatter), goalie table (SV%, GAA, GSAx), cap by position, expiring contracts, most trade chatter.
+3. Player Profile (paid; free for players on My Team): header with contract, clause, surplus value; a "Play style" section (section 6: archetype, Claude scouting summary and tags, trait percentile bars, shot location split, strengths, watch-outs, 2 similar players); stat cards including Faceoff %; last-5 game log including FO won-lost; advanced metrics with percentile bars; sentiment by audience with 14-day chatter chart, signals, latest mentions; age curve; NHL EDGE skating.
 4. Trade Targets (paid): filterable list (position, age, cap hit, term, clauses, chatter, buy-low), cap fit vs. a chosen team with required retention, WAR, surplus, sentiment, chatter, signal tags, alert cards. No FO% here.
 5. Trade Builder (paid): two-sided deal, cap impact for both teams, retention slider (max 50%), automatic checks (cap compliance, no-trade list, retention slots, roster count, term vs. age curve), comparable trades, market read. Users can save and share scenarios.
 6. Rumor Tracker (paid, new): league-wide feed of trade-related mentions grouped by player, with chatter volume, 14-day trend, sentiment by audience, and whether chatter is rising or fading. Filter by team and position. Show our summaries and source links, not copied text.
@@ -242,10 +260,10 @@ Done when: any team's roster page and any player's profile render real numbers t
 On-ice metrics, per-60 rates, zone starts, relative stats, our own xG model (MoneyPuck was skipped to avoid its licensing question), and our own Game Score in goals above average (HockeyStatCards was dropped).
 
 ### Phase 4: Sentiment scoring
-Player matching, Claude scoring, daily aggregation, trade chatter, spikes, perception gap. Sentiment panels live on Profile and Roster. Rumor Tracker page.
+Player matching, Claude scoring, daily aggregation, trade chatter, spikes, perception gap. Sentiment panels live on Profile and Roster. Rumor Tracker page. Play style traits, shot location split, and similar players (stats only, no Claude) are built in this phase too, since they need nothing new; the Claude-written play style text (archetype, summary, tags, strengths, watch-outs) is built here and turned on with the same API key as sentiment scoring. Pages are restyled to match the `Design/` screenshots as they are touched.
 
 ### Phase 5: League and trade tools
-Team grades, League page, Trade Targets filters and signals, Trade Builder with cap math and checks, surplus value, aging curves, best fits.
+Team grades, League page, Trade Targets filters and signals, Trade Builder with cap math and checks, surplus value, aging curves, best fits, WAR. The Team Roster "Undervalued on this roster" section lands here, because it needs surplus value and (for the full performance percentile) WAR; it also needs Phase 4 sentiment.
 
 ### Phase 6: Accounts, billing, and launch
 Clerk sign-up and onboarding (favorite team), My Team landing, `getAccess` gating on every paid page and API route, Stripe Checkout (monthly and annual), webhooks, Customer Portal, Stripe Tax, pricing and landing pages, account page, legal placeholders, watchlists, saved scenarios, alerts, weekly email with unsubscribe, job failure notifications, error monitoring.
