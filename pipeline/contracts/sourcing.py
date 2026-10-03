@@ -30,7 +30,7 @@ PER_CONTRACT = 4          # signing headlines kept per contract, newest first
 # Signing headlines nearly always state money or length; others are skipped before paying for Claude.
 SIGNING = re.compile(r"\$|million|\bm\b|year|entry-level|\belc\b|extension|re-sign|signs|signed|agree", re.IGNORECASE)
 MONEY = re.compile(r"\$\s?\d|million", re.IGNORECASE)
-TERM = re.compile(r"b(one|two|three|four|five|six|seven|eight|\d)[- ]year", re.IGNORECASE)
+TERM = re.compile(r"\b(one|two|three|four|five|six|seven|eight|\d)[- ]year", re.IGNORECASE)
 TOLERANCE = 0.01          # announced figures are often rounded ("$5.4 million"), so within 1% counts as a match
 
 
