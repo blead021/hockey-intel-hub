@@ -22,6 +22,7 @@ from pipeline.ingest.nightly import current_season
 CONTRACT_TYPES = {"signing": "standard", "extension": "extension", "entry_level": "entry_level"}
 TEAM_MOVES = {"trade", "waiver_claim"}
 ENDINGS = {"buyout": "bought_out", "termination": "terminated"}
+ADJUSTMENTS = {"bonus_overage", "dead_cap"}
 # Roster moves set player_status; they never change a contract.
 ROSTER_MOVES = {
     "assigned_to_minors": "minors", "recalled": "nhl", "activated": "nhl",
@@ -156,6 +157,26 @@ class Applier:
                 )
         return outcome
 
+    def _adjust(self, kind: str, t: dict, player_id: int | None, team_id: int, news: list[dict]):
+        """Records a buyout, bonus overage, or dead cap charge for this season. A stated amount replaces an
+        unknown one; a known amount is never replaced by a missing one."""
+        urls = [n["url"] for n in news if n.get("url")]
+        row = self.conn.execute(
+            """insert into team_cap_adjustments (team_id, season_id, kind, player_id, player_name, amount, source_urls)
+               values (%s, %s, %s, %s, %s, %s, %s)
+               on conflict (team_id, season_id, kind, coalesce(player_name, '')) do update
+                 set amount = coalesce(excluded.amount, team_cap_adjustments.amount),
+                     player_id = coalesce(excluded.player_id, team_cap_adjustments.player_id),
+                     source_urls = excluded.source_urls
+               where team_cap_adjustments.amount is distinct from coalesce(excluded.amount, team_cap_adjustments.amount)
+               returning id""",
+            (team_id, current_season(), kind, player_id, t.get("player_name"), t.get("cap_charge"), urls),
+        ).fetchone()
+        if row is None:
+            return "no_change", f"{kind} already on file", []
+        amount = t.get("cap_charge")
+        return "applied", f"{kind} {'of ' + str(amount) if amount else 'with amount not yet reported'}", []
+
     def _status(self, t: dict, player_id: int, team_id: int | None, news: list[dict]):
         """Records a roster move as the player's status, unless a newer status is already on file."""
         dates = [n["published_at"].date() for n in news if n.get("published_at")]
@@ -177,6 +198,10 @@ class Applier:
     def _decide(self, t: dict, player_id: int | None, team_id: int | None, news: list[dict] | None = None):
         if t["status"] != "completed":
             return "skipped_unconfirmed", f"news says {t['status']}, not completed", []
+        if t["type"] in ADJUSTMENTS:
+            if team_id is None:
+                return "skipped_unmatched", f"unknown team {t.get('team')!r}", []
+            return self._adjust(t["type"], t, player_id, team_id, news or [])
         if t["type"] in ROSTER_MOVES:
             if player_id is None:
                 return "skipped_unmatched", f"no single NHL player named {t['player_name']!r}", []
@@ -200,7 +225,11 @@ class Applier:
                 return "skipped_unmatched", f"unknown team {t.get('team')!r}", []
             return self._move(t, player_id, team_id)
         if t["type"] in ENDINGS:
-            return self._end(t, player_id)
+            outcome, note, changes = self._end(t, player_id)
+            if t["type"] == "buyout" and team_id is not None:
+                # The buyout's charge this season, or a row with an unknown amount until it is reported.
+                self._adjust("buyout", t, player_id, team_id, news or [])
+            return outcome, note, changes
         return "skipped_type", f"{t['type']} does not change a contract", []
 
     def _roster_team(self, player_id: int | None) -> int | None:

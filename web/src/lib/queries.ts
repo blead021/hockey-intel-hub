@@ -850,3 +850,11 @@ export async function getCapCharges(sql: Sql, teamId: number): Promise<CapCharge
     select player_id, name, kind, charge::float8 as charge from team_cap_charges
     where team_id = ${teamId} and charge > 0 order by kind, charge desc`;
 }
+
+// When contracts, roster status, and cap adjustments were last brought up to date from the news.
+export async function getCapUpdatedAt(sql: Sql): Promise<string | null> {
+  const [row] = await sql<{ d: string | null }[]>`
+    select to_char(max(finished_at) at time zone 'America/New_York', 'YYYY-MM-DD') as d
+    from job_runs where job = 'contract_news' and status = 'success'`;
+  return row?.d ?? null;
+}

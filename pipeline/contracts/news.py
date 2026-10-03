@@ -26,6 +26,7 @@ QUERIES = [
     'NHL ("claimed off waivers" OR "buyout" OR "bought out" OR "contract terminated")',
     'site:nhl.com (recalled OR recalls OR assigned OR assigns OR reassigned OR "injured reserve" OR LTIR OR activated)',
     'NHL ("assigned to" OR "recalled from" OR "sent down" OR "placed on injured reserve" OR "long-term injured reserve")',
+    'NHL ("bonus overage" OR "dead cap" OR "buyout cap hit" OR "cap recapture")',
 ]
 LOOKBACK = "when:2d"
 BLOCKED_OUTLETS = re.compile(r"puckpedia|spotrac|capwages|capfriendly|cap ?friendly", re.IGNORECASE)
@@ -34,7 +35,7 @@ TRANSACTION_WORDS = re.compile(
     r"elc|acquire|acquires|acquired|trade|trades|traded|retain|retained|waiver|waivers|claim|claims|claimed|"
     r"buyout|buy out|bought out|terminate|terminated|termination|tender|one-year|two-year|three-year|"
     r"four-year|five-year|six-year|seven-year|eight-year|roster moves?|transactions?|recall|recalls|recalled|"
-    r"assign|assigns|assigned|reassigned|loaned|sent down|injured reserve|ltir|activated|activate|call(?:ed)? up)\b",
+    r"assign|assigns|assigned|reassigned|loaned|sent down|injured reserve|ltir|activated|activate|call(?:ed)? up|overage|dead cap|recapture)\b",
     re.IGNORECASE,
 )
 

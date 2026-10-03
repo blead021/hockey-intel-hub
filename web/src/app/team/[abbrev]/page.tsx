@@ -4,10 +4,11 @@ import { connection } from "next/server";
 import { TeamSelect } from "@/components/team-select";
 import { SeasonPicker, StatCard, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
-import { faceoffPct, money, num, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
+import { faceoffPct, money, num, season as seasonLabel, shortDate, signed, svPct, toi } from "@/lib/format";
 import {
   getCapCeiling,
   getCapCharges,
+  getCapUpdatedAt,
   getContractCount,
   getEnabledSources,
   getExpiring,
@@ -65,7 +66,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -79,12 +80,13 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       isCurrent ? getReserveList(sql, team.id, season) : Promise.resolve([]),
       getContractCount(sql, team.id, season),
       isCurrent ? getCapCharges(sql, team.id) : Promise.resolve([] as CapCharge[]),
+      getCapUpdatedAt(sql),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -118,7 +120,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Cap committed" value={hasContracts ? money(capCommitted) : "—"} detail={ceiling ? `of ${money(ceiling)} ceiling` : "ceiling not set"} />
+        <StatCard label="Cap committed" value={hasContracts ? money(capCommitted) : "—"} detail={ceiling ? `of ${money(ceiling)} ceiling${isCurrent && capAsOf ? ` · as of ${shortDate(capAsOf)}` : ""}` : "ceiling not set"} />
         <StatCard
           label="Cap space"
           value={hasContracts && ceiling ? money(ceiling - capCommitted) : "—"}
@@ -314,6 +316,9 @@ const OFF_ROSTER: Record<string, string> = {
   waivers: "On waivers",
   buried: "Buried in the minors",
   unknown: "Off the roster, status unconfirmed",
+  "adjustment:buyout": "Buyouts",
+  "adjustment:bonus_overage": "Bonus overage from last season",
+  "adjustment:dead_cap": "Other dead cap",
 };
 
 function CapByPosition({ forwards, defense, goalies, retained, offRoster }: { forwards: number; defense: number; goalies: number; retained: RetainedCharge[]; offRoster: CapCharge[] }) {
@@ -355,8 +360,9 @@ function CapByPosition({ forwards, defense, goalies, retained, offRoster }: { fo
         </p>
       ))}
       <p className="mt-2 text-xs text-muted">
-        Players in the minors count only above the buried allowance (league minimum salary plus $375,000). Status comes
-        from roster-move news. Buyouts and LTIR relief are not tracked yet.
+        Players in the minors count only above the buried allowance (league minimum salary plus $375,000). Roster
+        status, buyouts, and bonus overages come from team announcements and news, checked daily. LTIR relief is not
+        shown.
       </p>
     </Panel>
   );

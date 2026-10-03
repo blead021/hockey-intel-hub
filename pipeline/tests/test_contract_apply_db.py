@@ -47,7 +47,7 @@ def _t(**kw):
     base = {"type": "signing", "status": "completed", "player_name": "X", "team": None, "from_team": None,
             "cap_hit": None, "total_value": None, "years": None, "start_season": None, "end_season": None,
             "expiry_status": None, "clause": None, "no_trade_list_size": None, "retained_pct": None,
-            "retained_by": None, "items": [1], "evidence": "e"}
+            "retained_by": None, "cap_charge": None, "items": [1], "evidence": "e"}
     return {**base, **kw}
 
 
@@ -165,3 +165,21 @@ def test_roster_moves_set_status_and_never_go_backwards(conn, setup):
     assert status()[0] == "nhl" and str(status()[1]) == "2026-10-08"
     # Roster moves never touch the contract.
     assert _contracts(conn, player_id) == before
+
+
+def test_cap_adjustments_record_amounts_and_never_lose_them(conn, setup):
+    applier, player_id, name, team, other, teams = setup
+    adj = lambda kind: conn.execute(
+        "select amount from team_cap_adjustments where team_id = %s and kind = %s", (teams[team], kind)).fetchall()
+    conn.execute("delete from team_cap_adjustments where team_id = %s", (teams[team],))
+
+    assert applier.apply(_t(type="bonus_overage", player_name="Team", team=team, cap_charge=46407), NEWS) == "applied"
+    assert adj("bonus_overage") == [(46407,)]
+    assert applier.apply(_t(type="bonus_overage", player_name="Team", team=team, cap_charge=None), NEWS) == "no_change"
+    assert adj("bonus_overage") == [(46407,)]
+
+    # A buyout ends the contract and records the charge; the amount fills in when a later item states it.
+    assert applier.apply(_t(type="buyout", player_name=name, team=team), NEWS) == "applied"
+    assert adj("buyout") == [(None,)]
+    assert applier.apply(_t(type="buyout", player_name=name, team=team, cap_charge=1_500_000), NEWS) in ("applied", "no_change")
+    assert adj("buyout") == [(1_500_000,)]

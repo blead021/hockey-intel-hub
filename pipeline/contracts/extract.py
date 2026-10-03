@@ -18,6 +18,8 @@ EVENT_TYPES = [
     "signing", "extension", "entry_level", "trade", "waiver_claim", "buyout", "termination",
     # Roster moves: no contract change, but they decide how the cap hit counts (CLAUDE.md, player status).
     "assigned_to_minors", "recalled", "injured_reserve", "ltir", "activated", "placed_on_waivers",
+    # Cap adjustments: count against a team's cap without a contract (CLAUDE.md, cap totals).
+    "bonus_overage", "dead_cap",
     "other",
 ]
 
@@ -44,13 +46,14 @@ TRANSACTION_SCHEMA = {
         "no_trade_list_size": _nullable({"type": "integer"}),
         "retained_pct": _nullable({"type": "number"}),
         "retained_by": _nullable({"type": "string"}),
+        "cap_charge": _nullable({"type": "integer"}),
         "items": {"type": "array", "items": {"type": "integer"}},
         "evidence": {"type": "string"},
     },
     "required": [
         "type", "status", "player_name", "team", "from_team", "cap_hit", "total_value", "years",
         "start_season", "end_season", "expiry_status", "clause", "no_trade_list_size", "retained_pct",
-        "retained_by", "items", "evidence",
+        "retained_by", "cap_charge", "items", "evidence",
     ],
     "additionalProperties": False,
 }
@@ -70,7 +73,7 @@ def system_prompt(team_codes: dict[str, str]) -> str:
 You will get numbered news items: outlet, date, and headline (sometimes a short summary). Return one transaction per player per transaction. When several items describe the same transaction, return it once and list every item number in "items".
 
 Fields:
-- type: signing (a new contract that is not an extension or entry-level deal, including re-signing a pending free agent), extension (signed while a current contract still has time left), entry_level, trade, waiver_claim, buyout, termination; roster moves: assigned_to_minors (sent, assigned, loaned, or reassigned to the AHL, ECHL, junior, or Europe, including clearing waivers and being assigned), recalled (called up or recalled from the minors), injured_reserve (placed on injured reserve, IR, or non-roster injured), ltir (placed on long-term injured reserve), activated (activated off IR or LTIR), placed_on_waivers; or other (anything else, such as an AHL-only deal, a professional tryout, or a coaching move).
+- type: signing (a new contract that is not an extension or entry-level deal, including re-signing a pending free agent), extension (signed while a current contract still has time left), entry_level, trade, waiver_claim, buyout, termination; roster moves: assigned_to_minors (sent, assigned, loaned, or reassigned to the AHL, ECHL, junior, or Europe, including clearing waivers and being assigned), recalled (called up or recalled from the minors), injured_reserve (placed on injured reserve, IR, or non-roster injured), ltir (placed on long-term injured reserve), activated (activated off IR or LTIR), placed_on_waivers; cap adjustments: bonus_overage (performance bonuses carried over from last season and charged to this season's cap) and dead_cap (other dead cap, such as recapture or a terminated contract's remaining charge); or other (anything else, such as an AHL-only deal, a professional tryout, or a coaching move).
 - status: completed when the team or league announced it or the item reports it as done ("signs", "acquired", "claimed"). reported when it is attributed to sources or insiders ("reportedly", "per sources", "is expected to", "agreed to terms, according to"). rumor for speculation or talks.
 - player_name: the player's full name as written.
 - team: the team the player is now under contract with (signing team, acquiring team, or claiming team; for roster moves, his NHL team). from_team: the team he left, for trades and waiver claims. Use these codes only: {codes}.
@@ -78,6 +81,7 @@ Fields:
 - start_season, end_season: like "2027-28", only when stated (for example "runs through 2030-31" gives end_season "2030-31").
 - expiry_status, clause, no_trade_list_size: only when stated. clause "none" only when the item says there is no clause.
 - retained_pct and retained_by: for trades where a team keeps part of the salary ("retain 50 percent" is 50).
+- cap_charge: for buyouts, bonus overages, and dead cap, the amount counting against the current season's cap, in whole dollars, only when stated. For a bonus overage, team is the team charged and player_name may be the player whose bonuses caused it, or the team name if none is given.
 - evidence: a short paraphrase, in your own words, of what the items say. Under 20 words. Do not copy sentences.
 
 Rules:
