@@ -94,7 +94,7 @@ export default async function TradeTargetsPage({ searchParams }: PageProps<"/tra
     };
     const [targets, power] = await Promise.all([
       getTradeTargets(sql, season, filters),
-      team ? getTeamBuyingPower(sql, team.id, season) : Promise.resolve(undefined),
+      team ? getTeamBuyingPower(sql, team.id) : Promise.resolve(undefined),
     ]);
     return { teams, team, targets, power };
   });

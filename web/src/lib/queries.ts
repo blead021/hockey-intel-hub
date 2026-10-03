@@ -828,10 +828,10 @@ export async function getLeagueGrid(sql: Sql, season: number): Promise<{ rows: L
     g as (
       select team_id, json_object_agg(category, grade) as grades, max(sample) as sample
       from team_grades, latest where as_of = latest.d group by team_id),
-    charges as (select team_id, sum(charge) as cap from team_cap_charges group by team_id),
+    charges as (select team_id, space from team_cap_space),
     ceiling as (select cap_ceiling from cap_limits where season_id = ${season})
     select t.id as team_id, t.abbrev, t.name, t.conference, coalesce(g.grades, '{}'::json) as grades,
-           (select cap_ceiling from ceiling) - coalesce(ch.cap, 0) as cap_space,
+           ch.space as cap_space,
            to_char((select d from latest), 'YYYY-MM-DD') as as_of, g.sample
     from teams t left join g on g.team_id = t.id
     left join charges ch on ch.team_id = t.id
@@ -984,10 +984,9 @@ export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters
 // A team's cap space this season and its Need/Thin categories, for cap fit and the "Roster need" card.
 export type TeamNeed = { category: string; grade: number };
 
-export async function getTeamBuyingPower(sql: Sql, teamId: number, season: number): Promise<{ space: number | null; needs: TeamNeed[] }> {
+export async function getTeamBuyingPower(sql: Sql, teamId: number): Promise<{ space: number | null; needs: TeamNeed[] }> {
   const [row] = await sql<{ space: number | null; needs: TeamNeed[] | null }[]>`
-    select (select cap_ceiling from cap_limits where season_id = ${season})
-             - coalesce((select sum(charge) from team_cap_charges where team_id = ${teamId}), 0) as space,
+    select (select space from team_cap_space where team_id = ${teamId}) as space,
            (select json_agg(json_build_object('category', category, 'grade', grade) order by grade, z) from team_grades
              where team_id = ${teamId} and as_of = (select max(as_of) from team_grades) and grade < 0) as needs`;
   return { space: row?.space == null ? null : Number(row.space), needs: row?.needs ?? [] };
@@ -1012,8 +1011,7 @@ export async function getBuilderTeam(sql: Sql, abbrev: string, season: number): 
   const team = await getTeam(sql, abbrev);
   if (!team) return undefined;
   const [summary] = await sql<{ space: number | null; ceiling: number | null; roster_count: number; contract_count: number; retained_slots_used: number; status: string | null }[]>`
-    select (select cap_ceiling from cap_limits where season_id = ${season})::float8
-             - coalesce((select sum(charge) from team_cap_charges where team_id = ${team.id}), 0)::float8 as space,
+    select (select space from team_cap_space where team_id = ${team.id})::float8 as space,
            (select cap_ceiling from cap_limits where season_id = ${season})::float8 as ceiling,
            (select count(*) from players where current_team_id = ${team.id})::int as roster_count,
            (select count(*) from contracts where team_id = ${team.id} and status = 'active'
@@ -1065,4 +1063,11 @@ export async function getUndervalued(sql: Sql, season: number, teamId: number | 
     where not x.star and x.perf_pct >= 60 and x.gap > 0
       and (${teamId}::int is null or p.current_team_id = ${teamId})
     order by x.gap desc limit ${limit}`;
+}
+
+// This season's cap space with LTIR relief applied (team_cap_space view).
+export async function getTeamCapSpace(sql: Sql, teamId: number): Promise<{ space: number; ltir_relief: number } | undefined> {
+  const [row] = await sql<{ space: number; ltir_relief: number }[]>`
+    select space::float8 as space, ltir_relief::float8 as ltir_relief from team_cap_space where team_id = ${teamId}`;
+  return row;
 }

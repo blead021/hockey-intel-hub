@@ -28,7 +28,7 @@ export default async function TradeBuilderPage({ searchParams }: PageProps<"/tra
     let suggestions: Suggestion[] = [];
     if (teamA) {
       const [power, targets] = await Promise.all([
-        getTeamBuyingPower(sql, teamA.id, season),
+        getTeamBuyingPower(sql, teamA.id),
         getTradeTargets(sql, season, { exceptTeamId: teamA.id, group: "FD" }),
       ]);
       const goalieNeed = power.needs.some((n) => n.category === "goaltending");

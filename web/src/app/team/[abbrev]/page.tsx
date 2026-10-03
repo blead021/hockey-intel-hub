@@ -9,6 +9,7 @@ import {
   getCapCeiling,
   getCapCharges,
   getCapUpdatedAt,
+  getTeamCapSpace,
   getUndervalued,
   getContractCount,
   getEnabledSources,
@@ -68,7 +69,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -84,12 +85,13 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       isCurrent ? getCapCharges(sql, team.id) : Promise.resolve([] as CapCharge[]),
       getCapUpdatedAt(sql),
       isCurrent ? getUndervalued(sql, season, team.id, 4) : Promise.resolve([] as Undervalued[]),
+      isCurrent ? getTeamCapSpace(sql, team.id) : Promise.resolve(undefined),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -126,8 +128,10 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
         <StatCard label="Cap committed" value={hasContracts ? money(capCommitted) : "—"} detail={ceiling ? `of ${money(ceiling)} ceiling${isCurrent && capAsOf ? ` · as of ${shortDate(capAsOf)}` : ""}` : "ceiling not set"} />
         <StatCard
           label="Cap space"
-          value={hasContracts && ceiling ? money(ceiling - capCommitted) : "—"}
-          detail={`Retained slots used: ${retained.length} of ${MAX_RETAINED}`}
+          value={hasContracts && ceiling ? money(capSpace ? capSpace.space : ceiling - capCommitted) : "—"}
+          detail={capSpace && capSpace.ltir_relief > 0
+            ? `Using ${money(capSpace.ltir_relief)} of LTIR relief · retained slots ${retained.length} of ${MAX_RETAINED}`
+            : `Retained slots used: ${retained.length} of ${MAX_RETAINED}`}
         />
         <StatCard label="Active roster" value={skaters.length + goalies.length} detail={showContracts && isCurrent ? `${contractCount} of 50 NHL contracts` : isCurrent ? "on the current roster" : "played this season"} />
         <StatCard label="5v5 xGF%" value={pct1(summary?.xgf_pct)} detail={summary?.xgf_rank ? `${ordinal(summary.xgf_rank)} in NHL` : undefined} />
