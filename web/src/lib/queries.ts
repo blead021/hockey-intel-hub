@@ -992,3 +992,57 @@ export async function getTeamBuyingPower(sql: Sql, teamId: number, season: numbe
              where team_id = ${teamId} and as_of = (select max(as_of) from team_grades) and grade < 0) as needs`;
   return { space: row?.space == null ? null : Number(row.space), needs: row?.needs ?? [] };
 }
+
+export type BuilderPlayer = {
+  id: number; name: string; position: string; age: number | null; on_roster: boolean;
+  cap_hit: number; retained_pct: number; years: number; end_season: number; expiry_status: string | null;
+  clause: string | null; no_trade_list_size: number | null; war_proj: number | null; surplus: number | null;
+  fans: number | null; fans_trend: number | null; chatter: number;
+};
+export type BuilderPick = { id: number; draft_year: number; round: number; original: string; condition: string | null };
+export type BuilderTeam = {
+  id: number; abbrev: string; name: string; space: number | null; ceiling: number | null;
+  roster_count: number; contract_count: number; retained_slots_used: number; status: string | null;
+  players: BuilderPlayer[]; picks: BuilderPick[];
+};
+
+// Everything the Trade Builder needs for one team: cap space (team_cap_charges), roster and contract counts,
+// retained-salary slots, its players under contract with value and sentiment, and the draft picks it owns.
+export async function getBuilderTeam(sql: Sql, abbrev: string, season: number): Promise<BuilderTeam | undefined> {
+  const team = await getTeam(sql, abbrev);
+  if (!team) return undefined;
+  const [summary] = await sql<{ space: number | null; ceiling: number | null; roster_count: number; contract_count: number; retained_slots_used: number; status: string | null }[]>`
+    select (select cap_ceiling from cap_limits where season_id = ${season})::float8
+             - coalesce((select sum(charge) from team_cap_charges where team_id = ${team.id}), 0)::float8 as space,
+           (select cap_ceiling from cap_limits where season_id = ${season})::float8 as ceiling,
+           (select count(*) from players where current_team_id = ${team.id})::int as roster_count,
+           (select count(*) from contracts where team_id = ${team.id} and status = 'active'
+             and ${season} between coalesce(start_season, 0) and end_season)::int as contract_count,
+           (select count(*) from contracts where retained_by = ${team.id} and retained_pct > 0 and status = 'active'
+             and ${season} between coalesce(start_season, 0) and end_season)::int as retained_slots_used,
+           (select status from team_power where team_id = ${team.id}) as status`;
+  const players = await sql<BuilderPlayer[]>`
+    with latest as (select max(date) as d from sentiment_daily)
+    select p.id, p.first_name || ' ' || p.last_name as name, p.position,
+           date_part('year', age(p.birth_date))::int as age, p.current_team_id = ${team.id} as on_roster,
+           c.cap_hit::float8 as cap_hit, coalesce(c.retained_pct, 0)::float8 as retained_pct,
+           (c.end_season / 10000 - ${season} / 10000 + 1)::int as years, c.end_season, c.expiry_status, c.clause,
+           c.no_trade_list_size,
+           (select war_proj::float8 from player_value v where v.player_id = p.id order by as_of desc limit 1) as war_proj,
+           (select surplus::float8 from player_value v where v.player_id = p.id order by as_of desc limit 1) as surplus,
+           (select score_0_100::float8 from sentiment_daily s, latest where s.player_id = p.id and s.date = latest.d and s.audience = 'fan') as fans,
+           (select (s.score_0_100 - o.score_0_100)::float8 from sentiment_daily s join sentiment_daily o
+              on o.player_id = s.player_id and o.audience = 'fan' and o.date = s.date - 14, latest
+              where s.player_id = p.id and s.date = latest.d and s.audience = 'fan') as fans_trend,
+           coalesce((select sum(trade_mentions) from sentiment_daily s, latest
+                     where s.player_id = p.id and s.audience <> 'all' and s.date > latest.d - 7), 0)::int as chatter
+    from contracts c join players p on p.id = c.player_id
+    where c.team_id = ${team.id} and c.status = 'active' and c.cap_hit is not null
+      and ${season} between coalesce(c.start_season, 0) and c.end_season
+    order by p.current_team_id = ${team.id} desc, c.cap_hit desc`;
+  const picks = await sql<BuilderPick[]>`
+    select d.id, d.draft_year, d.round, o.abbrev as original, d.condition
+    from draft_picks d join teams o on o.id = d.original_team_id
+    where d.owner_team_id = ${team.id} order by d.draft_year, d.round, o.abbrev`;
+  return { ...team, ...summary, players, picks };
+}

@@ -10,7 +10,7 @@ const TABS: { label: string; href: string | null; match: (path: string) => boole
   { label: "Team Roster", href: "/teams", match: (p) => p.startsWith("/team") },
   { label: "Player Profile", href: null, match: (p) => p.startsWith("/player") },
   { label: "Trade Targets", href: "/trade-targets", match: (p) => p.startsWith("/trade-targets") },
-  { label: "Trade Builder", href: null, match: (p) => p.startsWith("/trade-builder") },
+  { label: "Trade Builder", href: "/trade-builder", match: (p) => p.startsWith("/trade-builder") },
   { label: "Rumor Tracker", href: "/rumors", match: (p) => p.startsWith("/rumors") },
 ];
 
