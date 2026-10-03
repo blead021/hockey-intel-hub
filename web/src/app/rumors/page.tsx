@@ -1,3 +1,6 @@
+import { Locked } from "@/components/locked";
+import { can } from "@/lib/access";
+import { currentAccess } from "@/lib/session";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Label, Panel, Unavailable } from "@/components/ui";
@@ -18,6 +21,7 @@ const AUDIENCES: Record<string, string> = { fan: "Fans", beat_writer: "Beat writ
 
 export default async function RumorsPage({ searchParams }: PageProps<"/rumors">) {
   await connection();
+  if (!can(await withDb(currentAccess), "rumors")) return <Locked eyebrow="Pro" title="Rumor Tracker" what="the Rumor Tracker" />;
   const params = await searchParams;
   const team = typeof params.team === "string" && /^[A-Z]{3}$/.test(params.team) ? params.team : undefined;
   const group = params.pos === "F" || params.pos === "D" || params.pos === "G" ? params.pos : undefined;

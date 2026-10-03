@@ -1,3 +1,6 @@
+import { Locked } from "@/components/locked";
+import { can } from "@/lib/access";
+import { currentAccess } from "@/lib/session";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Info, Unavailable } from "@/components/ui";
@@ -70,6 +73,7 @@ function Trend({ v }: { v: number | null }) {
 
 export default async function TradeTargetsPage({ searchParams }: PageProps<"/trade-targets">) {
   await connection();
+  if (!can(await withDb(currentAccess), "trade_targets")) return <Locked eyebrow="Pro" title="Trade Targets" what="Trade Targets" />;
   const p = (await searchParams) as Params;
   const season = currentSeason();
   const teamCode = one(p, "team")?.toUpperCase();

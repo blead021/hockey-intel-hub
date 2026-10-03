@@ -40,6 +40,9 @@ export function SiteNav() {
             );
           })}
         </nav>
+        <Link href="/pricing" className={`ml-auto shrink-0 rounded-md px-3 py-2 text-sm ${path.startsWith("/pricing") ? "bg-white/15 font-semibold" : "text-surface/80"} hover:bg-white/10`}>
+          Pricing
+        </Link>
       </div>
     </header>
   );

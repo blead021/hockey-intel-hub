@@ -1,3 +1,6 @@
+import { Locked } from "@/components/locked";
+import { canViewPlayer } from "@/lib/access";
+import { currentAccess } from "@/lib/session";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
@@ -57,6 +60,15 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
   await connection();
   const id = parseId((await params).id);
   if (!id) notFound();
+  // Every player for Pro; free users get the players on their favorite team.
+  const gate = await withDb(async (sql) => {
+    const [access, [row]] = await Promise.all([
+      currentAccess(sql),
+      sql<{ team_id: number | null; name: string }[]>`select current_team_id as team_id, first_name || ' ' || last_name as name from players where id = ${id}`,
+    ]);
+    return { ok: !row || canViewPlayer(access, row.team_id), name: row?.name ?? "Player" };
+  });
+  if (!gate.ok) return <Locked eyebrow="Player profile" title={gate.name} what="every Player Profile" />;
   const season = currentSeason();
 
   const data = await withDb(async (sql) => {

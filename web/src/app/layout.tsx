@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Barlow_Condensed, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { SiteFooter } from "@/components/footer";
 import { SiteNav } from "@/components/nav";
 import { SITE_NAME } from "@/lib/site";
 import "./globals.css";
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body suppressHydrationWarning>
         <SiteNav />
         {children}
+        <SiteFooter />
       </body>
     </html>
   );

@@ -1,3 +1,6 @@
+import { Locked } from "@/components/locked";
+import { can } from "@/lib/access";
+import { currentAccess } from "@/lib/session";
 import { connection } from "next/server";
 import { TradeBuilder, type Suggestion } from "@/components/trade-builder";
 import { withDb } from "@/lib/db";
@@ -12,6 +15,7 @@ const one = (p: Params, k: string) => (typeof p[k] === "string" ? (p[k] as strin
 
 export default async function TradeBuilderPage({ searchParams }: PageProps<"/trade-builder">) {
   await connection();
+  if (!can(await withDb(currentAccess), "trade_builder")) return <Locked eyebrow="Pro" title="Trade Builder" what="the Trade Builder" />;
   const p = (await searchParams) as Params;
   const season = currentSeason();
   const a = one(p, "a")?.toUpperCase();

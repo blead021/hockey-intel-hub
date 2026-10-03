@@ -1,3 +1,6 @@
+import { Locked } from "@/components/locked";
+import { canViewTeam } from "@/lib/access";
+import { currentAccess } from "@/lib/session";
 import Link from "next/link";
 import { Fragment } from "react";
 import { notFound } from "next/navigation";
@@ -64,6 +67,12 @@ function TrendArrow({ value }: { value: number | null | undefined }) {
 export default async function TeamPage({ params, searchParams }: PageProps<"/team/[abbrev]">) {
   await connection();
   const { abbrev } = await params;
+  // Every team for Pro; free users get their favorite team (My Team).
+  const gate = await withDb(async (sql) => {
+    const [access, t] = await Promise.all([currentAccess(sql), getTeam(sql, abbrev)]);
+    return { ok: !t || canViewTeam(access, t.id), name: t?.name ?? abbrev };
+  });
+  if (!gate.ok) return <Locked eyebrow="Team roster" title={gate.name} what="every team" />;
   const requested = parseSeason((await searchParams).season);
   const current = currentSeason();
 
