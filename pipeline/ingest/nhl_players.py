@@ -66,7 +66,7 @@ def refresh_rosters(conn, http, counts) -> None:
             """insert into player_status (player_id, status, team_id, since)
                select p.id, 'nhl', p.current_team_id, current_date from players p where p.id = any(%s)
                on conflict (player_id) do update set status = 'nhl', team_id = excluded.team_id,
-                 since = current_date, source = 'roster', note = null, updated_at = now()
+                 since = current_date, source = 'roster', note = null, cap_charge = null, updated_at = now()
                where player_status.status <> 'nhl' and player_status.since < current_date""",
             (list(on_roster),),
         )

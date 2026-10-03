@@ -1,7 +1,7 @@
 """Record a player's roster status by hand, for moves the news never reported.
 
 Usage:
-    python -m pipeline.status_override "Matthew Poitras" minors --note "Per Brian: Bruins cap chart, no public assignment news"
+    python -m pipeline.status_override "Matthew Poitras" ir --cap-charge 30990 --note "Two-way contract, IR before the season: charge prorated by last season's NHL days (prohockeyrumors.com)"
 
 Statuses: nhl, ir, ltir, minors, waivers. Dated today, so any later news (a recall, an injury placement) or the
 nightly roster refresh replaces it as usual. The change is logged with its note.
@@ -20,6 +20,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("player", help="full name as on the site")
     parser.add_argument("status", choices=STATUSES)
     parser.add_argument("--note", required=True, help="where this came from")
+    parser.add_argument("--cap-charge", type=int, help="the cap charge a reported rule sets (leave out for the usual amount)")
     args = parser.parse_args(argv)
     with connect() as conn:
         rows = conn.execute(
@@ -30,11 +31,11 @@ def main(argv: list[str] | None = None) -> None:
         player_id, team_id = rows[0]
         old = conn.execute("select status, since, source from player_status where player_id = %s", (player_id,)).fetchone()
         conn.execute(
-            """insert into player_status (player_id, status, team_id, since, source, note, updated_at)
-               values (%s, %s, %s, %s, 'manual', %s, now())
+            """insert into player_status (player_id, status, team_id, since, source, note, cap_charge, updated_at)
+               values (%s, %s, %s, %s, 'manual', %s, %s, now())
                on conflict (player_id) do update set status = excluded.status, since = excluded.since,
-                 source = 'manual', note = excluded.note, updated_at = now()""",
-            (player_id, args.status, team_id, date.today(), args.note),
+                 source = 'manual', note = excluded.note, cap_charge = excluded.cap_charge, updated_at = now()""",
+            (player_id, args.status, team_id, date.today(), args.note, args.cap_charge),
         )
         conn.commit()
     print(f"{args.player}: {old[0] if old else 'none'} ({old[2] if old else '-'}) -> {args.status} (manual). Note: {args.note}")

@@ -213,7 +213,7 @@ class Applier:
             """insert into player_status (player_id, status, team_id, since, updated_at)
                values (%s, %s, %s, %s, now())
                on conflict (player_id) do update set status = excluded.status, team_id = excluded.team_id,
-                 since = excluded.since, source = 'news', note = null, updated_at = now()
+                 since = excluded.since, source = 'news', note = null, cap_charge = null, updated_at = now()
                where player_status.since <= excluded.since
                returning player_id""",
             (player_id, status, team_id, since),
