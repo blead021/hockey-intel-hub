@@ -36,7 +36,7 @@ class TooManyFailures(RuntimeError):
 def main(argv: list[str] | None = None) -> None:
     from pipeline.ingest import nhl_games, nhl_players, nhl_teams
     from pipeline.metrics import game_score, onice
-    from pipeline.models import team_grades, war
+    from pipeline.models import team_grades, value, war
 
     parser = argparse.ArgumentParser(description="Load NHL games, stats, and rosters")
     parser.add_argument("--season", type=int, help="backfill one season (e.g. 20232024)")
@@ -85,6 +85,7 @@ def main(argv: list[str] | None = None) -> None:
         counts.update({f"onice_{k}": v for k, v in onice_counts.items()})
         game_score.compute_season(conn, season, counts)  # league rates change daily, so redo the season
         war.compute(conn, season, counts)  # after Game Score, which it builds on
+        value.run(conn, counts)  # age curves, WAR projections, market and surplus value
         team_grades.run(conn, counts)
 
         if not backfill:

@@ -191,6 +191,7 @@ If Evolving-Hockey is not licensed, build a simplified regularized model from on
 
 ### Surplus value
 Estimate market AAV with a comparables model (nearest neighbors on age, position, WAR/82, points/82 over the prior three seasons, adjusted to cap %). Surplus = market AAV estimate - cap hit.
+- Implemented 2026-10-03 in `pipeline/models/value.py` (nightly, tables `player_value`, `aging_curves`). WAR projection per 82: last three seasons weighted 5/4/3 by games, plus 20 games of replacement level, plus the age curve's change (none for goalies until a goalie curve exists). Market value: per position group, the straight-line fit of cap share (against the ceiling of the season the contract started) on projected WAR and regressed points per 82 among veterans 27+ not on entry-level deals; a trend line rather than a neighbour average, because averaging neighbours undervalues the very best. The 10 nearest veterans are kept as comparables. Needs 40 games over three seasons. Market value is kept between the league minimum and the 20% maximum. Age curves: delta method on WAR per 82, ages with few pairs shrunk toward no change, smoothed two ages either side, index 100 at the peak.
 
 ### Sentiment
 - Claude scores each mention: target players, sentiment -1 to 1, is_trade_related, one-line summary. Batch requests, use a small fast model (for example `claude-haiku-4-5-20251001`), and cache by mention ID so nothing is scored twice.
