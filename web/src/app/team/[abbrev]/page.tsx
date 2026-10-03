@@ -9,6 +9,7 @@ import {
   getCapCeiling,
   getCapCharges,
   getCapUpdatedAt,
+  getUndervalued,
   getContractCount,
   getEnabledSources,
   getExpiring,
@@ -25,6 +26,7 @@ import {
   type PlayerSentiment,
   type ReservePlayer,
   type CapCharge,
+  type Undervalued,
   type RetainedCharge,
   type RosterGoalie,
   type RosterSkater,
@@ -66,7 +68,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -81,12 +83,13 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       getContractCount(sql, team.id, season),
       isCurrent ? getCapCharges(sql, team.id) : Promise.resolve([] as CapCharge[]),
       getCapUpdatedAt(sql),
+      isCurrent ? getUndervalued(sql, season, team.id, 4) : Promise.resolve([] as Undervalued[]),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -145,6 +148,8 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
           }
         />
       </div>
+
+      {undervalued.length > 0 && <UndervaluedHere rows={undervalued} />}
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-border bg-surface px-4 pb-4">
         <table className="w-full min-w-max border-collapse text-sm">
@@ -461,6 +466,36 @@ function ReserveList({ rows, season }: { rows: ReservePlayer[]; season: number }
       )}
       <p className="mt-3 text-xs text-muted">
         Prospects and depth players signed to NHL contracts, including two-way deals. Players on AHL-only contracts are not listed.
+      </p>
+    </section>
+  );
+}
+
+// "Undervalued on this roster" (CLAUDE.md section 6): the team's top 4 by perception gap, with Claude's reason.
+function UndervaluedHere({ rows }: { rows: Undervalued[] }) {
+  return (
+    <section className="mt-6 rounded-lg border border-border bg-surface p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-heading text-2xl font-semibold uppercase tracking-tight">Undervalued on this roster</h2>
+        <p className="text-xs text-muted">Performance well above what fans think · biggest gaps first</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {rows.map((u) => (
+          <Link key={u.player_id} href={`/player/${u.player_id}`} className="rounded-lg border border-border p-3 hover:border-ink">
+            <p className="font-semibold">{u.name}</p>
+            <p className="text-xs text-muted">{u.position} · age {u.age ?? "—"} · {money(u.cap_hit)}</p>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-center text-xs">
+              <div><p className="text-muted">Fans</p><p className="font-mono text-base text-negative">{Math.round(u.fans)}</p></div>
+              <div><p className="text-muted">Perf.</p><p className="font-mono text-base text-positive">{Math.round(u.perf_pct)}</p></div>
+              <div><p className="text-muted">Surplus</p><p className={`font-mono text-base ${u.surplus == null ? "" : u.surplus >= 0 ? "text-positive" : "text-negative"}`}>{u.surplus == null ? "—" : `${u.surplus >= 0 ? "+" : "−"}${money(Math.abs(u.surplus))}`}</p></div>
+            </div>
+            {u.reason && <p className="mt-2 text-sm">{u.reason}</p>}
+          </Link>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-muted">
+        Fans = fan sentiment 0-100. Perf. = performance percentile at his position among players fans discuss (5v5
+        expected goals share, projected WAR, Game Score). Reasons are written by Claude from the numbers only.
       </p>
     </section>
   );

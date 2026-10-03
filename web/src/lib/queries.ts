@@ -1046,3 +1046,23 @@ export async function getBuilderTeam(sql: Sql, abbrev: string, season: number): 
     where d.owner_team_id = ${team.id} order by d.draft_year, d.round, o.abbrev`;
   return { ...team, ...summary, players, picks };
 }
+
+export type Undervalued = {
+  player_id: number; name: string; team: string; position: string; age: number | null; cap_hit: number | null;
+  fans: number; perf_pct: number; gap: number; surplus: number | null; reason: string | null;
+};
+
+// Perception gap (player_perception view): performance well above how his fans feel, household names left out.
+export async function getUndervalued(sql: Sql, season: number, teamId: number | null, limit: number): Promise<Undervalued[]> {
+  return sql<Undervalued[]>`
+    select x.player_id, p.first_name || ' ' || p.last_name as name, t.abbrev as team, p.position,
+           date_part('year', age(p.birth_date))::int as age,
+           (select cap_hit::float8 from contracts c where c.player_id = p.id and c.status = 'active'
+             and ${season} between coalesce(c.start_season, 0) and c.end_season order by end_season limit 1) as cap_hit,
+           x.fans, x.perf_pct, x.gap, x.surplus, r.reason
+    from player_perception x join players p on p.id = x.player_id join teams t on t.id = p.current_team_id
+    left join player_value_reasons r on r.player_id = x.player_id
+    where not x.star and x.perf_pct >= 60 and x.gap > 0
+      and (${teamId}::int is null or p.current_team_id = ${teamId})
+    order by x.gap desc limit ${limit}`;
+}

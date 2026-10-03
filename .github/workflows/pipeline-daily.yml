@@ -30,6 +30,11 @@ jobs:
       - run: pip install -e .
       - name: Load last night's games and current rosters
         run: python -m pipeline.ingest.nightly
+      - name: Write undervalued reasons (Claude, about 5 cents)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
+        run: python -m pipeline.models.undervalued
       - name: Heartbeat
         if: always()
         run: python -m pipeline.heartbeat
