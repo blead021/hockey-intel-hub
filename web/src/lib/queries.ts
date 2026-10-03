@@ -816,29 +816,20 @@ export type LeagueRow = {
   grades: Record<string, number | null>; cap_space: number | null;
 };
 
-// League page: each team's latest need grades and cap space (ceiling minus roster cap hits after
-// retention, minus salary it retained on players it traded away).
+// League page: each team's latest need grades and cap space (ceiling minus everything in team_cap_charges).
 export async function getLeagueGrid(sql: Sql, season: number): Promise<{ rows: LeagueRow[]; asOf: string | null; sample: string | null }> {
   const rows = await sql<(LeagueRow & { as_of: string | null; sample: string | null })[]>`
     with latest as (select max(as_of) as d from team_grades),
     g as (
       select team_id, json_object_agg(category, grade) as grades, max(sample) as sample
       from team_grades, latest where as_of = latest.d group by team_id),
-    roster_cap as (
-      select p.current_team_id as team_id, sum(c.cap_hit * (1 - coalesce(c.retained_pct, 0) / 100)) as cap
-      from contracts c join players p on p.id = c.player_id and p.current_team_id = c.team_id
-      where c.status = 'active' and ${season} between coalesce(c.start_season, 0) and c.end_season
-      group by 1),
-    retained as (
-      select retained_by as team_id, sum(cap_hit * retained_pct / 100) as cap from contracts
-      where retained_pct > 0 and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
-      group by 1),
+    charges as (select team_id, sum(charge) as cap from team_cap_charges group by team_id),
     ceiling as (select cap_ceiling from cap_limits where season_id = ${season})
     select t.id as team_id, t.abbrev, t.name, t.conference, coalesce(g.grades, '{}'::json) as grades,
-           (select cap_ceiling from ceiling) - coalesce(rc.cap, 0) - coalesce(r.cap, 0) as cap_space,
+           (select cap_ceiling from ceiling) - coalesce(ch.cap, 0) as cap_space,
            to_char((select d from latest), 'YYYY-MM-DD') as as_of, g.sample
     from teams t left join g on g.team_id = t.id
-    left join roster_cap rc on rc.team_id = t.id left join retained r on r.team_id = t.id
+    left join charges ch on ch.team_id = t.id
     where t.active order by t.name`;
   return {
     rows: rows.map((r) => ({
@@ -848,4 +839,14 @@ export async function getLeagueGrid(sql: Sql, season: number): Promise<{ rows: L
     asOf: rows[0]?.as_of ?? null,
     sample: rows[0]?.sample ?? null,
   };
+}
+
+export type CapCharge = { player_id: number | null; name: string; kind: string; charge: number };
+
+// Everything counting against this team's cap this season, from the team_cap_charges view: roster players,
+// injured or LTIR players, players buried in the minors (above the allowance), waivers, and retained salary.
+export async function getCapCharges(sql: Sql, teamId: number): Promise<CapCharge[]> {
+  return sql<CapCharge[]>`
+    select player_id, name, kind, charge::float8 as charge from team_cap_charges
+    where team_id = ${teamId} and charge > 0 order by kind, charge desc`;
 }

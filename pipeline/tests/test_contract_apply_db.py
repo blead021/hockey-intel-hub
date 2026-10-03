@@ -145,3 +145,23 @@ def test_backfill_only_adds_missing_contracts_still_in_force(conn, setup):
              start_season="2025-26", end_season="2027-28")
     assert backfill.apply(new, NEWS) == "applied"
     assert backfill.apply(new, NEWS) == "skipped_on_file"
+
+
+def test_roster_moves_set_status_and_never_go_backwards(conn, setup):
+    from datetime import datetime, timezone
+
+    applier, player_id, name, team, other, teams = setup
+    conn.execute("delete from player_status where player_id = %s", (player_id,))
+    day = lambda d: [{"id": f"gn:{d}", "url": None, "published_at": datetime(2026, 10, d, tzinfo=timezone.utc)}]
+    status = lambda: conn.execute("select status, since from player_status where player_id = %s", (player_id,)).fetchone()
+    before = _contracts(conn, player_id)
+
+    assert applier.apply(_t(type="assigned_to_minors", player_name=name, team=team), day(5)) == "applied"
+    assert status()[0] == "minors"
+    # An older headline (placed on IR on the 3rd) does not overwrite the newer assignment.
+    assert applier.apply(_t(type="injured_reserve", player_name=name, team=team), day(3)) == "no_change"
+    assert status()[0] == "minors"
+    assert applier.apply(_t(type="recalled", player_name=name, team=team), day(8)) == "applied"
+    assert status()[0] == "nhl" and str(status()[1]) == "2026-10-08"
+    # Roster moves never touch the contract.
+    assert _contracts(conn, player_id) == before

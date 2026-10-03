@@ -61,6 +61,15 @@ def refresh_rosters(conn, http, counts) -> None:
         on_roster |= {p.id for p in players}
         counts["roster_players"] += len(players)
     with conn.transaction():
+        # Everyone on an NHL roster is up with the big club, unless news from today already says otherwise.
+        conn.execute(
+            """insert into player_status (player_id, status, team_id, since)
+               select p.id, 'nhl', p.current_team_id, current_date from players p where p.id = any(%s)
+               on conflict (player_id) do update set status = 'nhl', team_id = excluded.team_id,
+                 since = current_date, updated_at = now()
+               where player_status.status <> 'nhl' and player_status.since < current_date""",
+            (list(on_roster),),
+        )
         counts["left_rosters"] = conn.execute(
             "update players set current_team_id = null, updated_at = now() "
             "where current_team_id is not null and id <> all(%s)",

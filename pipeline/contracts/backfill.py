@@ -185,6 +185,26 @@ def check_players(conn, http, counts) -> None:
         time.sleep(PAUSE_SECONDS)
 
 
+def check_status(conn, http, counts) -> None:
+    """Players off every NHL roster whose cap charge depends on why (injured counts in full, the minors
+    only above the buried allowance): search roster-move news since training camps opened."""
+    rows = conn.execute(
+        """select distinct t.player_id, t.name from team_cap_charges t join contracts c on c.id = t.contract_id
+           where t.kind = 'unknown' and t.player_id is not null and (c.cap_hit > 1225000 or t.charge > 0)"""
+    ).fetchall()
+    for player_id, name in rows:
+        query = (f'"{name}" (assigned OR recalled OR "injured reserve" OR LTIR OR injury OR injured OR waivers '
+                 f'OR "sent down" OR loaned) after:2026-08-15')
+        response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+        archive.save("contract_backfill", f"status-{player_id}", {"query": query, "xml": response.text})
+        items = [i for i in parse_results(response.content, f"backfill check {player_id}")
+                 if mentions_player(i.title, name)]
+        _save(conn, items)
+        counts["status_players"] += 1
+        counts["status_headlines"] += len(items)
+        time.sleep(PAUSE_SECONDS)
+
+
 def _save(conn, items) -> None:
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
@@ -243,6 +263,7 @@ def main(argv: list[str] | None = None) -> None:
     mode.add_argument("--search", action="store_true")
     mode.add_argument("--teams", help="comma-separated team codes short of contracts, for example PHI,COL")
     mode.add_argument("--check", action="store_true", help="offseason transactions and flagged players (free)")
+    mode.add_argument("--status", action="store_true", help="roster-move news for off-roster players (free)")
     mode.add_argument("--reapply", action="store_true", help="retry unmatched backfill events without Claude")
     mode.add_argument("--estimate", action="store_true")
     mode.add_argument("--release", action="store_true")
@@ -255,6 +276,10 @@ def main(argv: list[str] | None = None) -> None:
         with job_run("contract_backfill_teams") as counts, connect(autocommit=True) as conn, client() as http:
             search_teams(conn, http, [t.strip().upper() for t in args.teams.split(",")], counts)
             print(f"team search ok: {dict(counts)}")
+    if args.status:
+        with job_run("contract_backfill_status") as counts, connect(autocommit=True) as conn, client() as http:
+            check_status(conn, http, counts)
+            print(f"status search ok: {dict(counts)}")
     if args.check:
         with job_run("contract_backfill_check") as counts, connect(autocommit=True) as conn, client() as http:
             search_offseason(conn, http, counts)

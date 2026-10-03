@@ -14,7 +14,12 @@ MODEL = os.environ.get("CONTRACTS_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("CONTRACTS_EFFORT", "medium")
 BATCH_SIZE = 40
 
-EVENT_TYPES = ["signing", "extension", "entry_level", "trade", "waiver_claim", "buyout", "termination", "other"]
+EVENT_TYPES = [
+    "signing", "extension", "entry_level", "trade", "waiver_claim", "buyout", "termination",
+    # Roster moves: no contract change, but they decide how the cap hit counts (CLAUDE.md, player status).
+    "assigned_to_minors", "recalled", "injured_reserve", "ltir", "activated", "placed_on_waivers",
+    "other",
+]
 
 
 def _nullable(schema: dict) -> dict:
@@ -65,10 +70,10 @@ def system_prompt(team_codes: dict[str, str]) -> str:
 You will get numbered news items: outlet, date, and headline (sometimes a short summary). Return one transaction per player per transaction. When several items describe the same transaction, return it once and list every item number in "items".
 
 Fields:
-- type: signing (a new contract that is not an extension or entry-level deal, including re-signing a pending free agent), extension (signed while a current contract still has time left), entry_level, trade, waiver_claim, buyout, termination, or other (anything else, such as a player placed on waivers, an AHL-only deal, a professional tryout, or a coaching move).
+- type: signing (a new contract that is not an extension or entry-level deal, including re-signing a pending free agent), extension (signed while a current contract still has time left), entry_level, trade, waiver_claim, buyout, termination; roster moves: assigned_to_minors (sent, assigned, loaned, or reassigned to the AHL, ECHL, junior, or Europe, including clearing waivers and being assigned), recalled (called up or recalled from the minors), injured_reserve (placed on injured reserve, IR, or non-roster injured), ltir (placed on long-term injured reserve), activated (activated off IR or LTIR), placed_on_waivers; or other (anything else, such as an AHL-only deal, a professional tryout, or a coaching move).
 - status: completed when the team or league announced it or the item reports it as done ("signs", "acquired", "claimed"). reported when it is attributed to sources or insiders ("reportedly", "per sources", "is expected to", "agreed to terms, according to"). rumor for speculation or talks.
 - player_name: the player's full name as written.
-- team: the team the player is now under contract with (signing team, acquiring team, or claiming team). from_team: the team he left, for trades and waiver claims. Use these codes only: {codes}.
+- team: the team the player is now under contract with (signing team, acquiring team, or claiming team; for roster moves, his NHL team). from_team: the team he left, for trades and waiver claims. Use these codes only: {codes}.
 - cap_hit, total_value: whole US dollars ("$43.2 million" is 43200000). years: contract length in seasons.
 - start_season, end_season: like "2027-28", only when stated (for example "runs through 2030-31" gives end_season "2030-31").
 - expiry_status, clause, no_trade_list_size: only when stated. clause "none" only when the item says there is no clause.

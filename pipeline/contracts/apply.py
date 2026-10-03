@@ -12,6 +12,7 @@ Rules (CLAUDE.md, Contracts):
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 
 from psycopg.types.json import Jsonb
@@ -21,6 +22,11 @@ from pipeline.ingest.nightly import current_season
 CONTRACT_TYPES = {"signing": "standard", "extension": "extension", "entry_level": "entry_level"}
 TEAM_MOVES = {"trade", "waiver_claim"}
 ENDINGS = {"buyout": "bought_out", "termination": "terminated"}
+# Roster moves set player_status; they never change a contract.
+ROSTER_MOVES = {
+    "assigned_to_minors": "minors", "recalled": "nhl", "activated": "nhl",
+    "injured_reserve": "ir", "ltir": "ltir", "placed_on_waivers": "waivers",
+}
 TRACKED = [
     "team_id", "cap_hit", "aav", "start_season", "end_season", "expiry_status", "clause",
     "no_trade_list_size", "retained_pct", "retained_by", "status", "contract_type",
@@ -133,7 +139,7 @@ class Applier:
         team_id = self.teams.get((t.get("team") or "").upper())
 
         with self.conn.transaction():
-            outcome, note, changes = self._decide(t, player_id, team_id)
+            outcome, note, changes = self._decide(t, player_id, team_id, news)
             event_id = self.conn.execute(
                 """insert into contract_events (job_run_id, event_type, event_status, player_name, player_id,
                        details, news_ids, source_urls, outcome, outcome_note, model)
@@ -150,9 +156,31 @@ class Applier:
                 )
         return outcome
 
-    def _decide(self, t: dict, player_id: int | None, team_id: int | None):
+    def _status(self, t: dict, player_id: int, team_id: int | None, news: list[dict]):
+        """Records a roster move as the player's status, unless a newer status is already on file."""
+        dates = [n["published_at"].date() for n in news if n.get("published_at")]
+        since = max(dates) if dates else date.today()
+        status = ROSTER_MOVES[t["type"]]
+        row = self.conn.execute(
+            """insert into player_status (player_id, status, team_id, since, updated_at)
+               values (%s, %s, %s, %s, now())
+               on conflict (player_id) do update set status = excluded.status, team_id = excluded.team_id,
+                 since = excluded.since, updated_at = now()
+               where player_status.since <= excluded.since
+               returning player_id""",
+            (player_id, status, team_id, since),
+        ).fetchone()
+        if row is None:
+            return "no_change", "a newer status is already on file", []
+        return "applied", f"status {status} as of {since}", []
+
+    def _decide(self, t: dict, player_id: int | None, team_id: int | None, news: list[dict] | None = None):
         if t["status"] != "completed":
             return "skipped_unconfirmed", f"news says {t['status']}, not completed", []
+        if t["type"] in ROSTER_MOVES:
+            if player_id is None:
+                return "skipped_unmatched", f"no single NHL player named {t['player_name']!r}", []
+            return self._status(t, player_id, team_id, news or [])
         if self.create_only:
             roster_team = self._roster_team(player_id)
             if t["type"] in CONTRACT_TYPES and self._on_file(t["player_name"], player_id):

@@ -7,6 +7,7 @@ import { withDb } from "@/lib/db";
 import { faceoffPct, money, num, season as seasonLabel, signed, svPct, toi } from "@/lib/format";
 import {
   getCapCeiling,
+  getCapCharges,
   getContractCount,
   getEnabledSources,
   getExpiring,
@@ -22,6 +23,7 @@ import {
   getTeamSummary,
   type PlayerSentiment,
   type ReservePlayer,
+  type CapCharge,
   type RetainedCharge,
   type RosterGoalie,
   type RosterSkater,
@@ -63,7 +65,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -76,19 +78,25 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       getRetainedCharges(sql, team.id, season),
       isCurrent ? getReserveList(sql, team.id, season) : Promise.resolve([]),
       getContractCount(sql, team.id, season),
+      isCurrent ? getCapCharges(sql, team.id) : Promise.resolve([] as CapCharge[]),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
   const defense = skaters.filter((s) => s.position === "D");
   const capOf = (list: { cap_hit: number | null }[]) => list.reduce((sum, p) => sum + (Number(p.cap_hit) || 0), 0);
   const retainedCap = retained.reduce((sum, r) => sum + r.charge, 0);
-  const capCommitted = capOf(skaters) + capOf(goalies) + retainedCap;
+  // This season: every contract the team holds (team_cap_charges), so injured and buried players count.
+  // Past seasons: the players who played for the team, plus retained salary.
+  const offRoster = charges.filter((c) => c.kind !== "roster" && c.kind !== "retained");
+  const capCommitted = isCurrent
+    ? charges.reduce((sum, c) => sum + c.charge, 0)
+    : capOf(skaters) + capOf(goalies) + retainedCap;
   const hasContracts = [...skaters, ...goalies].some((p) => p.cap_hit != null);
   const pickerSeasons = [...new Set([current, ...seasons])].sort((a, b) => b - a);
   const record = summary?.gp ? `${summary.w}-${summary.l}-${summary.otl} · ${summary.points} PTS` : seasonLabel(season);
@@ -191,7 +199,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       {showContracts && isCurrent && <ReserveList rows={reserve} season={season} />}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        {showContracts && <CapByPosition forwards={capOf(forwards)} defense={capOf(defense)} goalies={capOf(goalies)} retained={retained} />}
+        {showContracts && <CapByPosition forwards={capOf(forwards)} defense={capOf(defense)} goalies={capOf(goalies)} retained={retained} offRoster={offRoster} />}
         {showContracts && <Expiring rows={expiring} />}
         <MostChatter rows={chatter} />
       </div>
@@ -300,15 +308,28 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function CapByPosition({ forwards, defense, goalies, retained }: { forwards: number; defense: number; goalies: number; retained: RetainedCharge[] }) {
+const OFF_ROSTER: Record<string, string> = {
+  injured: "Injured reserve",
+  ltir: "Long-term injured reserve",
+  waivers: "On waivers",
+  buried: "Buried in the minors",
+  unknown: "Off the roster, status unconfirmed",
+};
+
+function CapByPosition({ forwards, defense, goalies, retained, offRoster }: { forwards: number; defense: number; goalies: number; retained: RetainedCharge[]; offRoster: CapCharge[] }) {
   const retainedTotal = retained.reduce((sum, r) => sum + r.charge, 0);
-  const total = forwards + defense + goalies + retainedTotal;
+  const groups = Object.keys(OFF_ROSTER)
+    .map((kind) => ({ kind, rows: offRoster.filter((c) => c.kind === kind) }))
+    .filter((g) => g.rows.length > 0);
+  const offTotal = offRoster.reduce((sum, c) => sum + c.charge, 0);
+  const total = forwards + defense + goalies + retainedTotal + offTotal;
   if (!total) return <Panel title="Cap by position"><Unavailable>No contracts loaded for this roster.</Unavailable></Panel>;
   const parts = [
     { label: "Forwards", value: forwards, color: "bg-positive" },
     { label: "Defense", value: defense, color: "bg-positive/60" },
     { label: "Goalies", value: goalies, color: "bg-positive/30" },
     ...(retainedTotal ? [{ label: "Retained on traded players", value: retainedTotal, color: "bg-negative/60" }] : []),
+    ...groups.map((g) => ({ label: OFF_ROSTER[g.kind], value: g.rows.reduce((sum, c) => sum + c.charge, 0), color: "bg-negative/30" })),
   ];
   return (
     <Panel title="Cap by position">
@@ -328,7 +349,15 @@ function CapByPosition({ forwards, defense, goalies, retained }: { forwards: num
           Retained: {retained.map((r) => `${r.name} (${r.team}, ${r.pct}%, ${money(r.charge)})`).join("; ")}.
         </p>
       )}
-      <p className="mt-2 text-xs text-muted">Buyouts and buried contracts are not tracked yet.</p>
+      {groups.map((g) => (
+        <p key={g.kind} className="mt-2 text-xs text-muted">
+          {OFF_ROSTER[g.kind]}: {g.rows.map((c) => `${c.name} (${money(c.charge)})`).join("; ")}.
+        </p>
+      ))}
+      <p className="mt-2 text-xs text-muted">
+        Players in the minors count only above the buried allowance (league minimum salary plus $375,000). Status comes
+        from roster-move news. Buyouts and LTIR relief are not tracked yet.
+      </p>
     </Panel>
   );
 }
