@@ -47,7 +47,7 @@ def _t(**kw):
     base = {"type": "signing", "status": "completed", "player_name": "X", "team": None, "from_team": None,
             "cap_hit": None, "total_value": None, "years": None, "start_season": None, "end_season": None,
             "expiry_status": None, "clause": None, "no_trade_list_size": None, "retained_pct": None,
-            "retained_by": None, "cap_charge": None, "items": [1], "evidence": "e"}
+            "retained_by": None, "cap_charge": None, "draft_year": None, "round": None, "original_team": None, "condition": None, "items": [1], "evidence": "e"}
     return {**base, **kw}
 
 
@@ -183,3 +183,26 @@ def test_cap_adjustments_record_amounts_and_never_lose_them(conn, setup):
     assert adj("buyout") == [(None,)]
     assert applier.apply(_t(type="buyout", player_name=name, team=team, cap_charge=1_500_000), NEWS) in ("applied", "no_change")
     assert adj("buyout") == [(1_500_000,)]
+
+
+def test_draft_picks_move_with_trades_and_never_back(conn, setup):
+    from datetime import datetime, timezone
+
+    applier, player_id, name, team, other, teams = setup
+    day = lambda d: [{"id": f"gn:p{d}", "url": None, "published_at": datetime(2026, 9, d, tzinfo=timezone.utc)}]
+    owner = lambda year, rnd, orig: conn.execute(
+        "select owner_team_id, condition from draft_picks where draft_year = %s and round = %s and original_team_id = %s",
+        (year, rnd, teams[orig])).fetchone()
+    pick = lambda **kw: _t(type="draft_pick", player_name="pick", **kw)
+
+    # Team trades its own 2027 2nd to the other team.
+    assert applier.apply(pick(team=other, from_team=team, draft_year=2027, round=2, condition="top-10 protected"), day(10)) == "applied"
+    assert owner(2027, 2, team) == (teams[other], "top-10 protected")
+    # Older news cannot move it back.
+    assert applier.apply(pick(team=team, from_team=other, original_team=team, draft_year=2027, round=2), day(5)) == "no_change"
+    # The other team flips the same pick (originally team's) onward; it stays recorded as team's pick.
+    third = next(code for code in teams if code not in (team, other))
+    assert applier.apply(pick(team=third, from_team=other, original_team=team, draft_year=2027, round=2), day(20)) == "applied"
+    assert owner(2027, 2, team)[0] == teams[third]
+    # A pick with no year stated is not guessed.
+    assert applier.apply(pick(team=other, from_team=team, draft_year=None, round=3), day(21)) == "skipped_unmatched"

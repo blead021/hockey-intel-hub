@@ -15,6 +15,7 @@ which is correct for unsigned draft picks.
 """
 
 import argparse
+import re
 import time
 from datetime import UTC, datetime
 
@@ -79,7 +80,8 @@ def search(conn, http, counts) -> None:
 NEWEST = """select id from (
     select id, query, row_number() over (partition by query order by published_at desc nulls last, id) as n
     from contract_news where status = 'backfill') r
-    where n <= %s or query like 'backfill team %%' or query like 'backfill check %%' or query = 'backfill offseason'"""
+    where n <= %s or query like 'backfill team %%' or query like 'backfill check %%' or query = 'backfill offseason'
+       or query like 'backfill picks %%'"""
 
 
 TEAM_QUERIES = [
@@ -121,7 +123,7 @@ def prune(conn) -> None:
         """update contract_news set status = 'skipped', processed_at = now(),
                error = 'backfill: player now covered by the contracts file'
            where status = 'backfill' and query not like 'backfill team %%' and query not like 'backfill check %%'
-             and query <> 'backfill offseason'"""
+             and query <> 'backfill offseason' and query not like 'backfill picks %%'"""
     )
     on_file = {
         normalize(n) for (n,) in conn.execute(
@@ -205,6 +207,27 @@ def check_status(conn, http, counts, since: str | None = "2026-08-15") -> None:
         time.sleep(PAUSE_SECONDS)
 
 
+PICK_HEADLINE = re.compile(r"\bpicks?\b", re.IGNORECASE)
+PICK_YEAR = re.compile(r"\b202[789]\b")
+
+
+def search_picks(conn, http, counts) -> None:
+    """One-time catch-up for draft picks: each team's trade news since mid-2023 that names a 2027-2029 pick.
+    Only headlines stating a pick year are kept; a pick without a year cannot be placed."""
+    for abbrev, name in conn.execute("select abbrev, name from teams where active order by abbrev").fetchall():
+        found: dict[str, object] = {}
+        for query in (f'"{name}" (trade OR traded OR acquire OR acquires OR deal) pick (2027 OR 2028 OR 2029) after:2023-06-01',
+                      f'"{name}" "round pick" (2027 OR 2028 OR 2029) after:2023-06-01'):
+            response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+            archive.save("contract_backfill", f"picks-{abbrev}", {"query": query, "xml": response.text})
+            for i in parse_results(response.content, f"backfill picks {abbrev}"):
+                if PICK_HEADLINE.search(i.title) and PICK_YEAR.search(i.title):
+                    found.setdefault(i.id, i)
+            time.sleep(PAUSE_SECONDS)
+        _save(conn, found.values())
+        counts[f"pick_headlines_{abbrev}"] = len(found)
+
+
 def _save(conn, items) -> None:
     with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
@@ -264,6 +287,7 @@ def main(argv: list[str] | None = None) -> None:
     mode.add_argument("--teams", help="comma-separated team codes short of contracts, for example PHI,COL")
     mode.add_argument("--check", action="store_true", help="offseason transactions and flagged players (free)")
     mode.add_argument("--status", action="store_true", help="roster-move news for off-roster players (free)")
+    mode.add_argument("--picks", action="store_true", help="draft pick trades since mid-2023 (free)")
     parser.add_argument("--any-date", action="store_true", help="with --status: search all dates (long-term injuries)")
     mode.add_argument("--reapply", action="store_true", help="retry unmatched backfill events without Claude")
     mode.add_argument("--estimate", action="store_true")
@@ -277,6 +301,10 @@ def main(argv: list[str] | None = None) -> None:
         with job_run("contract_backfill_teams") as counts, connect(autocommit=True) as conn, client() as http:
             search_teams(conn, http, [t.strip().upper() for t in args.teams.split(",")], counts)
             print(f"team search ok: {dict(counts)}")
+    if args.picks:
+        with job_run("contract_backfill_picks") as counts, connect(autocommit=True) as conn, client() as http:
+            search_picks(conn, http, counts)
+            print(f"pick search ok: {sum(counts.values())} headlines")
     if args.status:
         with job_run("contract_backfill_status") as counts, connect(autocommit=True) as conn, client() as http:
             check_status(conn, http, counts, None if args.any_date else "2026-08-15")

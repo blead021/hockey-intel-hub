@@ -20,6 +20,8 @@ EVENT_TYPES = [
     "assigned_to_minors", "recalled", "injured_reserve", "ltir", "activated", "placed_on_waivers",
     # Cap adjustments: count against a team's cap without a contract (CLAUDE.md, cap totals).
     "bonus_overage", "dead_cap",
+    # A draft pick moving in a trade (one transaction per pick).
+    "draft_pick",
     "other",
 ]
 
@@ -47,13 +49,18 @@ TRANSACTION_SCHEMA = {
         "retained_pct": _nullable({"type": "number"}),
         "retained_by": _nullable({"type": "string"}),
         "cap_charge": _nullable({"type": "integer"}),
+        "draft_year": _nullable({"type": "integer"}),
+        "round": _nullable({"type": "integer"}),
+        # Plain strings ("" when not stated): structured output allows at most 16 nullable fields.
+        "original_team": {"type": "string"},
+        "condition": {"type": "string"},
         "items": {"type": "array", "items": {"type": "integer"}},
         "evidence": {"type": "string"},
     },
     "required": [
         "type", "status", "player_name", "team", "from_team", "cap_hit", "total_value", "years",
         "start_season", "end_season", "expiry_status", "clause", "no_trade_list_size", "retained_pct",
-        "retained_by", "cap_charge", "items", "evidence",
+        "retained_by", "cap_charge", "draft_year", "round", "original_team", "condition", "items", "evidence",
     ],
     "additionalProperties": False,
 }
@@ -87,7 +94,8 @@ Fields:
 Rules:
 - Use only what the items state. Never fill a field from memory or general knowledge, and never calculate one field from another. Use null for anything not stated.
 - Skip items that are not about a player transaction. A list with no transactions is a valid answer.
-- For a trade involving several players, return one transaction per player, all of type trade."""
+- For a trade involving several players, return one transaction per player, all of type trade.
+- Draft picks in a trade: one draft_pick transaction per pick, with team = the team receiving the pick, from_team = the team giving it up, draft_year and round as stated (a "second-round pick" is round 2), original_team = the team whose pick it originally was when stated (for example "Toronto's 2027 first-round pick"; use "" if not stated), condition = any stated condition in a few words ("top-10 protected", "becomes a first if they make the playoffs"; "" if none). For every transaction that is not a draft pick, original_team and condition are "". player_name: a short label such as "2027 2nd-round pick". Leave draft_year null if the year is not stated; never assume it."""
 
 
 @dataclass

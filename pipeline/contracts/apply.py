@@ -157,6 +157,33 @@ class Applier:
                 )
         return outcome
 
+    def _pick(self, t: dict, team_id: int | None, news: list[dict]):
+        """Moves a draft pick to the team that received it. The pick is the original team's if stated,
+        otherwise the giving team's own pick. Older news never moves a pick back."""
+        year, rnd = t.get("draft_year"), t.get("round")
+        from_id = self.teams.get((t.get("from_team") or "").upper())
+        original_id = self.teams.get((t.get("original_team") or "").upper()) or from_id
+        if team_id is None or year is None or rnd is None or original_id is None:
+            return "skipped_unmatched", "pick year, round, or teams not stated", []
+        dates = [n["published_at"].date() for n in news if n.get("published_at")]
+        moved_on = max(dates) if dates else date.today()
+        row = self.conn.execute(
+            """update draft_picks set owner_team_id = %s, last_moved = %s,
+                   condition = coalesce(%s, condition)
+               where draft_year = %s and round = %s and original_team_id = %s
+                 and (last_moved is null or last_moved <= %s)
+               returning id""",
+            (team_id, moved_on, t.get("condition") or None, year, rnd, original_id, moved_on),
+        ).fetchone()
+        if row is None:
+            return "no_change", "pick not tracked (outside 2027-2029) or newer news already on file", []
+        self.conn.execute(
+            """insert into draft_pick_moves (pick_id, from_team_id, to_team_id, moved_on, source_urls)
+               values (%s, %s, %s, %s, %s)""",
+            (row[0], from_id, team_id, moved_on, [n["url"] for n in news if n.get("url")] or None),
+        )
+        return "applied", f"{year} round {rnd} pick to {t.get('team')}", []
+
     def _adjust(self, kind: str, t: dict, player_id: int | None, team_id: int, news: list[dict]):
         """Records a buyout, bonus overage, or dead cap charge for this season. A stated amount replaces an
         unknown one; a known amount is never replaced by a missing one."""
@@ -198,6 +225,8 @@ class Applier:
     def _decide(self, t: dict, player_id: int | None, team_id: int | None, news: list[dict] | None = None):
         if t["status"] != "completed":
             return "skipped_unconfirmed", f"news says {t['status']}, not completed", []
+        if t["type"] == "draft_pick":
+            return self._pick(t, team_id, news or [])
         if t["type"] in ADJUSTMENTS:
             if team_id is None:
                 return "skipped_unmatched", f"unknown team {t.get('team')!r}", []
