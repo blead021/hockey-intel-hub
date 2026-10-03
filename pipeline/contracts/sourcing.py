@@ -29,6 +29,8 @@ PAUSE_SECONDS = 1.5
 PER_CONTRACT = 4          # signing headlines kept per contract, newest first
 # Signing headlines nearly always state money or length; others are skipped before paying for Claude.
 SIGNING = re.compile(r"\$|million|\bm\b|year|entry-level|\belc\b|extension|re-sign|signs|signed|agree", re.IGNORECASE)
+MONEY = re.compile(r"\$\s?\d|million", re.IGNORECASE)
+TERM = re.compile(r"(one|two|three|four|five|six|seven|eight|\d)[- ]year", re.IGNORECASE)
 TOLERANCE = 0.01          # announced figures are often rounded ("$5.4 million"), so within 1% counts as a match
 
 
@@ -52,7 +54,9 @@ def search(conn, http, counts) -> None:
             if mentions_player(i.title, name) and SIGNING.search(i.title)
             and not BLOCKED_OUTLETS.search(i.outlet or "") and not BLOCKED_OUTLETS.search(i.url or "")
         ]
-        items.sort(key=lambda i: i.published_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+        # Headlines stating money or length first (they describe the deal), then the newest.
+        items.sort(key=lambda i: (bool(MONEY.search(i.title)), bool(TERM.search(i.title)),
+                                  i.published_at or datetime.min.replace(tzinfo=UTC)), reverse=True)
         items = items[:PER_CONTRACT]
         with conn.transaction():
             with conn.cursor() as cur:
