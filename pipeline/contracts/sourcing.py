@@ -124,20 +124,43 @@ def season_id(text: str | None) -> int | None:
     return int(m.group(1)) * 10000 + int(m.group(1)) + 1 if m else None
 
 
+def first_season(t: dict) -> int | None:
+    """The season a contract starts, from the headline date when the item does not say: an extension starts
+    the season after the one it was signed in; any other deal signed from June on starts that fall, and one
+    signed January to May counts for the season under way (as late-season college signings do)."""
+    signed = t.get("_date")
+    if signed is None:
+        return None
+    year = signed.year if signed.month >= 6 else signed.year - 1      # first year of the season under way
+    if t["type"] == "extension":
+        year += 1
+    return year * 10000 + year + 1
+
+
 def compare(on_file: dict, found: list[dict]) -> tuple[str, dict | None, str]:
-    """Picks the announcement that describes this contract and says whether it agrees with the file."""
+    """Picks the announcement that describes this contract and says whether it agrees with the file.
+
+    confirmed: the cap hit matches (within rounding) and the end season, when known, agrees.
+    term_confirmed: no dollar figure announced, but the signing and its length line up with the end season.
+    mismatch: the same contract (same end season) announced with a clearly different cap hit."""
     best = None
     for t in found:
         cap = t.get("cap_hit")
         if cap is None and t.get("total_value") and t.get("years"):
             cap = round(t["total_value"] / t["years"])   # arithmetic on stated figures, as in apply.py
         end = season_id(t.get("end_season"))
+        if end is None and t.get("years"):
+            start = season_id(t.get("start_season")) or first_season(t)
+            if start:
+                end = start + (t["years"] - 1) * 10001   # arithmetic: start season plus the stated length
         info = {"cap_hit": cap, "total_value": t.get("total_value"), "years": t.get("years"), "end_season": end,
-                "evidence": t.get("evidence")}
+                "evidence": t.get("evidence"), "status": t.get("status")}
         cap_ok = close(cap, on_file["cap_hit"])
         end_ok = end is None or on_file["end_season"] is None or end == on_file["end_season"]
         if cap_ok and end_ok:
             return "confirmed", info, "announcement matches cap hit" + (" and end season" if end else "")
+        if cap is None and end is not None and end == on_file["end_season"]:
+            best = best if best and best[0] == "mismatch" else ("term_confirmed", info, "signing and length confirmed; amount not announced")
         # Same contract (same end season) but a different figure is a real disagreement.
         if end is not None and end == on_file["end_season"] and cap is not None and not cap_ok:
             best = ("mismatch", info, f"announced cap hit {cap:,} vs {on_file['cap_hit']:,} on file")
@@ -179,13 +202,16 @@ def verify(conn, counts) -> None:
         per_contract: dict[int, list[dict]] = defaultdict(list)
         urls: dict[int, list[str]] = defaultdict(list)
         for t in result.transactions:
-            if t["status"] != "completed" or t["type"] not in ("signing", "extension", "entry_level"):
+            # Reports count too: this only confirms figures, it never changes a contract.
+            if t["status"] == "rumor" or t["type"] not in ("signing", "extension", "entry_level"):
                 continue
             for i in t["items"]:
                 row, item = chunk[i - 1]
                 # The transaction must be about this contract's player (full name, or surname as headlines do).
                 if mentions_player(t["player_name"], row[4]) or t["player_name"].split()[-1].lower() == row[4].split()[-1].lower():
-                    per_contract[row[0]].append(t)
+                    dated = [x[1]["published_at"].date() for x in chunk if x[0][0] == row[0] and x[1].get("published_at")]
+                    item_date = item["published_at"].date() if item.get("published_at") else (min(dated) if dated else None)
+                    per_contract[row[0]].append({**t, "_date": item_date})
                     if item.get("url"):
                         urls[row[0]].append(item["url"])
         for row in {row[0]: row for row, _ in chunk}.values():
@@ -222,12 +248,23 @@ def main(argv: list[str] | None = None) -> None:
     mode.add_argument("--search", action="store_true")
     mode.add_argument("--verify", action="store_true")
     mode.add_argument("--window", action="store_true", help="second search for older contracts (free)")
+    mode.add_argument("--recheck", action="store_true", help="re-read headlines of contracts not confirmed (cheap)")
     mode.add_argument("--report", action="store_true")
     args = parser.parse_args(argv)
     if args.search:
         with job_run("contract_sourcing_search") as counts, connect(autocommit=True) as conn, client() as http:
             search(conn, http, counts)
             print(f"sourcing search ok: {dict(counts)}")
+    elif args.recheck:
+        with connect(autocommit=True) as conn:
+            n = conn.execute(
+                """update contract_sources s set status = 'searching',
+                       found = jsonb_build_object('news_ids', (select jsonb_agg(n.id) from contract_news n
+                                                               where n.query = 'source ' || s.contract_id))
+                   where s.status in ('not_found', 'mismatch')
+                     and exists (select 1 from contract_news n where n.query = 'source ' || s.contract_id)"""
+            ).rowcount
+            print(f"{n} contracts queued to re-read")
     elif args.window:
         with job_run("contract_sourcing_window") as counts, connect(autocommit=True) as conn, client() as http:
             search_signing_window(conn, http, counts)

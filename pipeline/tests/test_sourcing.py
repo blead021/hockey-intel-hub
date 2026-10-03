@@ -15,3 +15,19 @@ def test_compare_confirms_rounded_figures_and_flags_real_differences():
     assert status == "mismatch" and found["cap_hit"] == 5_900_000
     # An older contract with a different end season and cap hit is not this one.
     assert compare(on_file, [{"cap_hit": 925_000, "end_season": "2022-23"}])[0] == "not_found"
+
+
+def test_term_confirmed_from_length_and_date():
+    from datetime import date
+
+    from pipeline.contracts.sourcing import first_season
+
+    # "Maple Leafs sign Brisson to one-year contract", July 2026: covers 2026-27.
+    t = {"type": "signing", "years": 1, "_date": date(2026, 7, 2), "status": "completed"}
+    assert first_season(t) == 20262027
+    assert compare({"cap_hit": 850_000, "end_season": 20262027}, [t])[0] == "term_confirmed"
+    # An extension signed in-season starts the next season.
+    ext = {"type": "extension", "years": 2, "_date": date(2025, 12, 1), "status": "completed"}
+    assert compare({"cap_hit": 925_000, "end_season": 20272028}, [ext])[0] == "term_confirmed"
+    # A different length does not confirm anything.
+    assert compare({"cap_hit": 850_000, "end_season": 20272028}, [t])[0] == "not_found"
