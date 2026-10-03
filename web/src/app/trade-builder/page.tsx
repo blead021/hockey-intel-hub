@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { TradeBuilder, type Suggestion } from "@/components/trade-builder";
 import { withDb } from "@/lib/db";
 import { availability, needFit } from "@/lib/needs";
-import { getAgingCurve, getBuilderTeam, getTeamBuyingPower, getTeams, getTradeTargets } from "@/lib/queries";
+import { getAgingCurve, getBuilderTeam, getComparableTrades, getTeamBuyingPower, getTeams, getTradeTargets } from "@/lib/queries";
 import { currentSeason } from "@/lib/seasons";
 
 export const metadata = { title: "Trade Builder" };
@@ -43,7 +43,11 @@ export default async function TradeBuilderPage({ searchParams }: PageProps<"/tra
           war_proj: t.war_proj, category: fill!.category, pctile: fill!.pctile, team_status: t.team_status, chatter: t.chatter,
         }));
     }
-    return { teams, teamA, teamB, curves: { F: curveF, D: curveD, G: curveG }, suggestions };
+    // Comparable past trades for the players in the deal (both directions), closest first, one entry per trade.
+    const dealIds = ["in", "out"].flatMap((k) => (one(p, k) ?? "").split(",").filter(Boolean).map(Number)).filter((n) => n > 0);
+    const seen = new Set<number>();
+    const comparables = (await getComparableTrades(sql, dealIds)).filter((c) => !seen.has(c.trade_id) && seen.add(c.trade_id)).slice(0, 6);
+    return { teams, teamA, teamB, curves: { F: curveF, D: curveD, G: curveG }, suggestions, comparables };
   });
 
   return (
@@ -55,6 +59,7 @@ export default async function TradeBuilderPage({ searchParams }: PageProps<"/tra
         teamB={data.teamB}
         curves={data.curves}
         suggestions={data.suggestions}
+        comparables={data.comparables}
         season={season}
         initial={{
           a: data.teamA?.abbrev ?? "", b: data.teamB?.abbrev ?? "",

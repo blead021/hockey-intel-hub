@@ -66,7 +66,7 @@ def describe(n: int, c: dict) -> str:
     if c.get("gf_pct") is not None:
         bits.append(f"5v5 actual goals share {c['gf_pct'] * 100:.1f}%")
     if c.get("war_proj") is not None:
-        bits.append(f"projected WAR per 82 {c['war_proj']:.1f}")
+        bits.append(f"projected WAR per full season {c['war_proj']:.1f}")
     if c.get("gs_pg") is not None:
         bits.append(f"Game Score {c['gs_pg']:+.2f} goals above average per game")
     if c.get("pdo") is not None:

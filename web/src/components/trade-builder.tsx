@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgePoint, BuilderPick, BuilderPlayer, BuilderTeam } from "@/lib/queries";
+import { Info } from "@/components/ui";
+import { GLOSSARY } from "@/lib/glossary";
+import type { AgePoint, BuilderPick, BuilderPlayer, BuilderTeam, ComparableTrade } from "@/lib/queries";
 
 const NEED_LABELS: Record<string, string> = {
   goal_scoring: "Goal scoring", playmaking: "Playmaking", physicality: "Physicality", defense_5v5: "5v5 defense",
@@ -39,6 +41,7 @@ export function TradeBuilder(props: {
   teamB: BuilderTeam | undefined;
   curves: Record<"F" | "D" | "G", AgePoint[]>;
   suggestions: Suggestion[];
+  comparables: ComparableTrade[];
   season: number;
   initial: Deal;
 }) {
@@ -291,14 +294,14 @@ export function TradeBuilder(props: {
           <section className="rounded-lg border border-border bg-surface p-5">
             <h2 className="mb-3 font-heading text-2xl font-semibold uppercase tracking-tight">Value &amp; market read</h2>
             <div className="flex justify-between text-sm font-semibold">
-              <span>Projected WAR in / out</span>
+              <span>Projected WAR in / out<Info text={GLOSSARY.WAR} /></span>
               <span className="font-mono">{warIn >= 0 ? "+" : ""}{warIn.toFixed(1)} / {warOut >= 0 ? "+" : ""}{warOut.toFixed(1)}</span>
             </div>
             <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-border-soft" aria-hidden>
               <div className="bg-positive" style={{ width: `${(Math.max(warIn, 0) / Math.max(Math.max(warIn, 0) + Math.max(warOut, 0), 0.01)) * 100}%` }} />
               <div className="bg-negative" style={{ width: `${(Math.max(warOut, 0) / Math.max(Math.max(warIn, 0) + Math.max(warOut, 0), 0.01)) * 100}%` }} />
             </div>
-            <p className="mt-3 text-sm">Surplus value in / out: <span className="font-mono">{money(surplusIn)} / {money(surplusOut)}</span></p>
+            <p className="mt-3 text-sm">Surplus value in / out<Info text={GLOSSARY.Surplus} />: <span className="font-mono">{money(surplusIn)} / {money(surplusOut)}</span></p>
             {(picksIn.length > 0 || picksOut.length > 0) && (
               <p className="mt-1 text-xs text-muted">Picks are counted at a rough WAR guide by round (a 1st about 1.0 per season once developed).</p>
             )}
@@ -307,7 +310,7 @@ export function TradeBuilder(props: {
                 {market.map((m) => <p key={m}>{m}</p>)}
               </div>
             )}
-            <p className="mt-3 text-xs text-muted">Comparable past trades arrive in a later update.</p>
+            <Comparables trades={props.comparables} />
           </section>
         </div>
       )}
@@ -397,5 +400,51 @@ function Row({ label, a, b, bold, neg }: { label: string; a: string; b: string; 
       <td className={`py-2 text-right ${bold ? "font-semibold" : ""} ${neg?.[0] ? "text-negative" : ""}`}>{a}</td>
       <td className={`py-2 text-right ${bold ? "font-semibold" : ""} ${neg?.[1] ? "text-negative" : ""}`}>{b}</td>
     </tr>
+  );
+}
+
+// Past trades of similar players, from the news our contracts job has read (mostly 2025 on), so the list grows over time.
+function Comparables({ trades }: { trades: ComparableTrade[] }) {
+  const month = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <h3 className="font-heading text-lg font-semibold uppercase tracking-tight">Comparable past trades</h3>
+      {trades.length === 0 ? (
+        <p className="mt-1 text-xs text-muted">No close match yet among past trades on file. Add players to the deal to search.</p>
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {trades.map((t) => {
+            const teams = [...new Set(t.items.map((i) => i.to))];
+            return (
+              <li key={t.trade_id} className="rounded-lg border border-border p-3 text-sm">
+                <p className="text-xs text-muted">
+                  {month(t.traded_on)} · {teams.join(" / ")} · <span className="font-semibold text-ink">{t.match_name}</span> is like {t.for_name}
+                </p>
+                {teams.map((team) => (
+                  <p key={team} className="mt-1">
+                    <span className="font-semibold">{team} got:</span>{" "}
+                    {t.items.filter((i) => i.to === team).map((i, n) => (
+                      <span key={`${i.name}-${n}`}>
+                        {n > 0 && ", "}
+                        {i.name}
+                        {i.kind === "player" && (i.age || i.cap_hit) && (
+                          <span className="text-xs text-muted">
+                            {" "}({[i.age ? `${i.age}` : null, i.cap_hit ? money(i.cap_hit) : null, i.war_rate != null ? `${i.war_rate.toFixed(1)} WAR/82` : null].filter(Boolean).join(", ")})
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </p>
+                ))}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-muted">
+        Matched on position, age, cap hit, and WAR at the time of the trade. Built from trades in the news our contracts job has
+        read, mostly since 2025, so older deals are missing and the list grows as new trades happen.
+      </p>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { Panel, Unavailable } from "@/components/ui";
+import { Label, Panel, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
 import { money, season as seasonLabel, shortDate } from "@/lib/format";
 import { getEnabledSources, getRumors, getTeams, type Rumor } from "@/lib/queries";
@@ -132,7 +132,7 @@ function RumorCard({ r }: { r: Rumor }) {
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           {[["Fans", r.fans], ["Beat", r.beat], ["Media", r.media]].map(([label, v]) => (
             <div key={label as string} className="rounded-md border border-border p-2">
-              <p className="text-xs text-muted">{label}</p>
+              <p className="text-xs text-muted"><Label text={label as string} align={label === "Media" ? "right" : "left"} /></p>
               <p className="font-mono">{v == null ? "—" : Math.round(v as number)}</p>
             </div>
           ))}

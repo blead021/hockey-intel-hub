@@ -23,6 +23,9 @@ CONTRACT_TYPES = {"signing": "standard", "extension": "extension", "entry_level"
 TEAM_MOVES = {"trade", "waiver_claim"}
 ENDINGS = {"buyout": "bought_out", "termination": "terminated"}
 ADJUSTMENTS = {"bonus_overage", "dead_cap"}
+# A team's dead cap not yet itemized from news, taken as one total from the cap sheet Brian provided (2026-09-28).
+# When the news names an item, its amount moves out of this total so nothing counts twice.
+SHEET_DEAD_CAP = "Other dead cap (2026-09-28 cap sheet total)"
 # Roster moves set player_status; they never change a contract.
 ROSTER_MOVES = {
     "assigned_to_minors": "minors", "recalled": "nhl", "activated": "nhl",
@@ -196,12 +199,17 @@ class Applier:
                      player_id = coalesce(excluded.player_id, team_cap_adjustments.player_id),
                      source_urls = excluded.source_urls
                where team_cap_adjustments.amount is distinct from coalesce(excluded.amount, team_cap_adjustments.amount)
-               returning id""",
+               returning id, (xmax = 0) as inserted""",
             (team_id, current_season(), kind, player_id, t.get("player_name"), t.get("cap_charge"), urls),
         ).fetchone()
         if row is None:
             return "no_change", f"{kind} already on file", []
         amount = t.get("cap_charge")
+        if row[1] and amount and t.get("player_name") != SHEET_DEAD_CAP:
+            self.conn.execute(
+                """update team_cap_adjustments set amount = greatest(amount - %s, 0)
+                   where team_id = %s and season_id = %s and kind = 'dead_cap' and player_name = %s""",
+                (amount, team_id, current_season(), SHEET_DEAD_CAP))
         return "applied", f"{kind} {'of ' + str(amount) if amount else 'with amount not yet reported'}", []
 
     def _status(self, t: dict, player_id: int, team_id: int | None, news: list[dict]):
@@ -237,7 +245,7 @@ class Applier:
             return self._status(t, player_id, team_id, news or [])
         if self.create_only:
             roster_team = self._roster_team(player_id)
-            if t["type"] in CONTRACT_TYPES and self._on_file(t["player_name"], player_id):
+            if t["type"] in CONTRACT_TYPES and self._on_file(t["player_name"], player_id, t["type"], news or []):
                 return "skipped_on_file", "backfill never changes a contract already on file", []
             if t["type"] in TEAM_MOVES and roster_team is not None and roster_team != team_id:
                 return "skipped_roster_disagrees", "the NHL roster shows him on another team", []
@@ -267,14 +275,40 @@ class Applier:
         row = self.conn.execute("select current_team_id from players where id = %s", (player_id,)).fetchone()
         return row[0] if row else None
 
-    def _on_file(self, name: str, player_id: int | None) -> bool:
+    def _on_file(self, name: str, player_id: int | None, kind: str | None = None, news: list[dict] | None = None) -> bool:
+        """Whether the contract this news describes is already on file.
+
+        An extension is a new contract that begins after the one in force, so the current contract does not
+        count unless it is the extension itself: a contract starting in the first season after the headline
+        (an extension reported in July 2026 that is on file starting 2026-27 is that deal, not a second one).
+        Headlines without a known date keep the cautious rule: any contract on file counts. (2026-10-03: the
+        old rule skipped every extension, including Marchenko's six years at $12.5M.)"""
         if player_id:
-            return bool(self._current(player_id))
+            current = self._current(player_id)
+            if kind == "extension":
+                reported = self._report_date(news or [])
+                if reported is None:
+                    return bool(current)
+                year = reported.year + (1 if reported.month >= 10 else 0)
+                first_after = year * 10000 + year + 1
+                return any(c.get("start_season") and c["start_season"] >= first_after for c in current)
+            return bool(current)
         return self.conn.execute(
             """select exists (select 1 from contracts where player_id is null and lower(player_name) = lower(%s)
                    and status = 'active' and (end_season is null or end_season >= %s))""",
             (name, current_season()),
         ).fetchone()[0]
+
+    def _report_date(self, news: list[dict]) -> date | None:
+        """Earliest date of the headlines behind a transaction, from the items or the contract_news table."""
+        dates = [n["published_at"].date() for n in news if n.get("published_at")]
+        if not dates:
+            ids = [n["id"] for n in news if n.get("id")]
+            if ids:
+                row = self.conn.execute(
+                    "select min(published_at)::date from contract_news where id = any(%s)", (ids,)).fetchone()
+                dates = [row[0]] if row and row[0] else []
+        return min(dates) if dates else None
 
     def _current(self, player_id: int) -> list[dict]:
         """Active contracts that are not over yet (or whose end is unknown), latest first."""

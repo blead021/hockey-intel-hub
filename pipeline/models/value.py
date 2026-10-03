@@ -4,13 +4,14 @@ Usage:
     python -m pipeline.models.value
 
 1. Age curves (delta method): for every player with two straight seasons of real playing time, the change
-   in WAR per 82 games from one age to the next, averaged by position group and age (weighted by the
+   in WAR per season (this season's length) from one age to the next, averaged by position group and age (weighted by the
    smaller of the two seasons' games), smoothed over neighbouring ages, and summed into an index that is
    100 at the peak.
-2. WAR projection, per 82 games next: the last three seasons weighted 5/4/3 by games played, with 20 games
+2. WAR projection, per full season (84 games from 2026-27, read from `seasons`): this season, last season, and the one
+   before weighted 6/5/2 per game played (5/4/3 until 2026-10-03), with 20 games
    of replacement level (0 WAR) added so short samples are pulled toward it, plus the age curve's change.
 3. Market value: among veterans (age 27+, not on entry-level deals), the straight-line relationship between
-   cap share and projected WAR plus points per 82 (skaters), fitted per position group, applied to this
+   cap share and projected WAR plus points per season (skaters), fitted per position group, applied to this
    player, times this season's ceiling (between the league minimum and the 20% maximum). A trend line, not an
    average of neighbours, so the very best players are not pulled down toward the players just below them.
    The 10 most similar veterans are kept as his comparables. Needs 40 weighted games over three seasons.
@@ -19,6 +20,7 @@ Usage:
 4. Surplus = market value minus cap hit (the full cap hit, before any retention).
 """
 
+from bisect import bisect_left
 from collections import defaultdict
 from datetime import date
 from math import sqrt
@@ -28,7 +30,7 @@ from pipeline.db import connect
 from pipeline.jobs import job_run
 
 MIN_GP = {"F": 20, "D": 20, "G": 10}
-WEIGHTS = (5, 4, 3)               # most recent season first
+WEIGHTS = (6, 5, 2)               # this season, last season, two seasons ago (Brian, 2026-10-03: recent play counts most)
 REGRESSION_GAMES = 20             # games of replacement level added to every projection
 MIN_WEIGHTED_GAMES = 40           # games across three seasons before a market value is estimated
 MAX_SHARE = 0.20                  # the CBA maximum contract is 20% of the ceiling
@@ -39,6 +41,7 @@ DEPTH_PTS_PER_GAME = 0.25         # a depth skater's scoring pace, for pulling s
 SHRINK_PAIRS = 30                 # ages with few player-season pairs are pulled toward no change
 SMOOTH = 2                        # ages either side averaged in
 GOALIE_SHRINK_SHOTS = 2000        # shots of league-average goaltending added to each goalie season
+GOALIE_MIN_PAIRS = 20             # goalie ages with fewer season pairs are left out of the curve
 
 
 def season_war(conn) -> dict[int, dict[int, dict]]:
@@ -56,8 +59,12 @@ def season_war(conn) -> dict[int, dict[int, dict]]:
     return out
 
 
-def per82(s: dict) -> float:
-    return s["war"] / s["gp"] * 82
+# Games in a full regular season: 82 through 2025-26, 84 from 2026-27 (new CBA). run() reads it from `seasons`.
+SEASON_GAMES = 84
+
+
+def per_season(s: dict, games: int = SEASON_GAMES) -> float:
+    return s["war"] / s["gp"] * games
 
 
 def history_rates(conn) -> dict[str, dict[int, dict[int, tuple[float, float, int]]]]:
@@ -91,14 +98,14 @@ def history_rates(conn) -> dict[str, dict[int, dict[int, tuple[float, float, int
     return out
 
 
-def aging_curves(history, war_seasons) -> dict[str, dict[int, tuple[float, float, int]]]:
-    """grp -> age -> (change in WAR per 82 from this age to the next, production index, pairs).
+def aging_curves(history, war_seasons, games: int = SEASON_GAMES) -> dict[str, dict[int, tuple[float, float, int]]]:
+    """grp -> age -> (change in WAR per season from this age to the next, production index, pairs).
 
     The shape comes from 25 seasons of history (delta method: each player's change from one season to the
     next, averaged by age, weighted by the smaller season's ice time or shots, shrunk toward no change where
     pairs are few, smoothed over neighbouring ages). Index: 100 at the peak; skaters as a share of peak
     scoring rate, goalies as peak goals allowed per shot over goals allowed per shot at that age. The WAR
-    change is the index change times a typical regular's WAR per 82 near the peak (our WAR seasons)."""
+    change is the index change times a typical regular's WAR per season near the peak (our WAR seasons)."""
     out = {}
     for grp in ("F", "D", "G"):
         sums: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0, 0])
@@ -112,7 +119,14 @@ def aging_curves(history, war_seasons) -> dict[str, dict[int, tuple[float, float
                 acc[0] += (nxt[0] - rate) * w
                 acc[1] += w
                 acc[2] += 1
-        raw = {age: (sm[0] / sm[1] * sm[2] / (sm[2] + SHRINK_PAIRS), sm[2]) for age, sm in sums.items() if sm[1] > 0}
+        bias = 0.0
+        if grp == "G":
+            # Goalies who keep their jobs after a lucky season slip back the next year at every age, which reads
+            # as decline even at 22. Only ages with enough goalies count, and that average slip is taken out, so
+            # what is left is the change with age (2026-10-03; before this the curve peaked at 19).
+            sums = {age: sm for age, sm in sums.items() if sm[2] >= GOALIE_MIN_PAIRS}
+            bias = sum(sm[0] for sm in sums.values()) / sum(sm[1] for sm in sums.values())
+        raw = {age: ((sm[0] / sm[1] - bias) * sm[2] / (sm[2] + SHRINK_PAIRS), sm[2]) for age, sm in sums.items() if sm[1] > 0}
         ages = range(MIN_AGE, MAX_AGE + 1)
         smooth = {}
         for age in ages:
@@ -130,7 +144,7 @@ def aging_curves(history, war_seasons) -> dict[str, dict[int, tuple[float, float
             index = {a: 100 * (1 - peak_rate) / max(1 - (peak_rate + levels[a] - levels[peak_age]), 1e-6) for a in ages}
         else:
             index = {a: max(0.0, 100 * (peak_rate + levels[a] - levels[peak_age]) / peak_rate) for a in ages}
-        war_peak = [per82(sea) for by in war_seasons.values() for sea in by.values()
+        war_peak = [per_season(sea, games) for by in war_seasons.values() for sea in by.values()
                     if sea["grp"] == grp and abs(sea["age"] - peak_age) <= 2 and sea["gp"] >= MIN_GP[grp]]
         war_scale = mean(war_peak) if war_peak else 0.0
         out[grp] = {
@@ -139,22 +153,22 @@ def aging_curves(history, war_seasons) -> dict[str, dict[int, tuple[float, float
     return out
 
 
-def project(by_season: dict[int, dict], current: int, curves) -> tuple[float, dict] | None:
-    """Projected WAR per 82 for next season, or None without recent play."""
+def project(by_season: dict[int, dict], current: int, curves, games: int = SEASON_GAMES) -> tuple[float, dict] | None:
+    """Projected WAR over a full season (games long), or None without recent play."""
     recent = [by_season.get(current - 10001 * i) for i in range(3)]
     if not any(recent):
         return None
     years_back, last = next((i, s) for i, s in enumerate(recent) if s)
     num = sum(w * s["war"] for w, s in zip(WEIGHTS, recent) if s)
     gp = sum(w * s["gp"] for w, s in zip(WEIGHTS, recent) if s)
-    rate = num / (gp + REGRESSION_GAMES * WEIGHTS[0]) * 82
+    rate = num / (gp + REGRESSION_GAMES * WEIGHTS[0]) * games
     age = last["age"] + years_back                      # his age this season
     delta = curves[last["grp"]].get(age, (0.0, 0, 0))[0]
     # Points pulled toward a depth player's pace the same way, so a hot handful of games is not a star.
     pts = sum(w * s["pts"] for w, s in zip(WEIGHTS, recent) if s)
-    pts82 = (pts + REGRESSION_GAMES * WEIGHTS[0] * DEPTH_PTS_PER_GAME) / (gp + REGRESSION_GAMES * WEIGHTS[0]) * 82
-    games = sum(s["gp"] for s in recent if s)
-    return rate + delta, {"grp": last["grp"], "age": age, "pts82": pts82, "games": games}
+    pts_season = (pts + REGRESSION_GAMES * WEIGHTS[0] * DEPTH_PTS_PER_GAME) / (gp + REGRESSION_GAMES * WEIGHTS[0]) * games
+    played = sum(s["gp"] for s in recent if s)
+    return rate + delta, {"grp": last["grp"], "age": age, "pts_season": pts_season, "games": played}
 
 
 def fit_line(xs: list[list[float]], ys: list[float]) -> list[float]:
@@ -178,18 +192,31 @@ def market_values(projections: dict[int, tuple[float, dict]], contracts: dict[in
     out = {}
     for grp in ("F", "D", "G"):
         people = {pid: p for pid, p in projections.items() if p[1]["grp"] == grp and p[1]["games"] >= MIN_WEIGHTED_GAMES}
-        feats = (lambda p: [p[0]]) if grp == "G" else (lambda p: [p[0], p[1]["pts82"]])
+        feats = (lambda p: [p[0]]) if grp == "G" else (lambda p: [p[0], p[1]["pts_season"]])
         pool = [pid for pid, p in people.items()
                 if p[1]["age"] >= VETERAN_AGE and pid in contracts and contracts[pid][1] > min_salary * 1.25]
         if len(pool) < 10:
             continue
         coef = fit_line([feats(people[q]) for q in pool], [contracts[q][0] for q in pool])
+        # Goalies: goalie WAR swings a lot from season to season, and a straight line through noisy numbers comes out
+        # too flat (the best goalies came out worth barely more than average ones). So a goalie is valued by rank
+        # instead: his projected WAR's place among veteran goalies maps to the cap share at the same place among
+        # their contracts (2026-10-03).
+        ranked_wars = sorted(people[q][0] for q in pool)
+        ranked_shares = sorted(contracts[q][0] for q in pool)
+
+        def by_rank(war: float) -> float:
+            place = bisect_left(ranked_wars, war) / len(ranked_wars) * (len(ranked_shares) - 1)
+            lo = int(place)
+            hi = min(lo + 1, len(ranked_shares) - 1)
+            return ranked_shares[lo] + (ranked_shares[hi] - ranked_shares[lo]) * (place - lo)
+
         # Comparables: nearest veterans on the same (standardized) measures plus age.
         cols = list(zip(*[feats(p) + [p[1]["age"]] for p in people.values()]))
         centre, scale = [mean(c) for c in cols], [pstdev(c) or 1.0 for c in cols]
         norm = {pid: [(v - m) / sd for v, m, sd in zip(feats(p) + [p[1]["age"]], centre, scale)] for pid, p in people.items()}
         for pid, p in people.items():
-            share = coef[0] + sum(c * x for c, x in zip(coef[1:], feats(p)))
+            share = by_rank(p[0]) if grp == "G" else coef[0] + sum(c * x for c, x in zip(coef[1:], feats(p)))
             market = min(max(share * ceiling, min_salary), MAX_SHARE * ceiling)
             near = sorted((sqrt(sum((a - b) ** 2 for a, b in zip(norm[pid], norm[q]))), q) for q in pool if q != pid)
             out[pid] = (market, [q for _, q in near[:NEIGHBOURS]])
@@ -200,9 +227,11 @@ def run(conn, counts) -> None:
     current = conn.execute("select max(season_id) from player_war").fetchone()[0]
     ceiling, min_salary = conn.execute(
         "select cap_ceiling, coalesce(min_salary, 0) from cap_limits where season_id = %s", (current,)).fetchone()
+    games = conn.execute("select regular_season_games from seasons where id = %s", (current,)).fetchone()
+    games = games[0] if games else SEASON_GAMES
     seasons = season_war(conn)
-    curves = aging_curves(history_rates(conn), seasons)
-    projections = {pid: p for pid, by in seasons.items() if (p := project(by, current, curves))}
+    curves = aging_curves(history_rates(conn), seasons, games)
+    projections = {pid: p for pid, by in seasons.items() if (p := project(by, current, curves, games))}
     # Cap share of each active contract, against the ceiling of the season it started (or this season).
     contracts = {
         pid: (float(share), float(hit)) for pid, share, hit in conn.execute(

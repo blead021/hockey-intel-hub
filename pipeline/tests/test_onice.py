@@ -127,17 +127,23 @@ def test_shooting_and_goalie_totals():
 
     from pipeline.metrics.onice import shooting_and_goalies
 
-    def row(event_id, shooter, goal, situation="1551", goalie=40, empty=0):
+    def row(event_id, shooter, goal, situation="1551", goalie=40, empty=0, on_goal=1):
         return SimpleNamespace(event_id=event_id, shooter_id=shooter, shooting_team=HOME, defending_team=AWAY,
-                               goalie_id=goalie, is_goal=goal, situation=situation, features={"empty_net": empty})
+                               goalie_id=goalie, is_goal=goal, situation=situation, features={"empty_net": empty},
+                               on_goal=on_goal)
 
-    rows = [row(1, 11, 0), row(2, 11, 1, situation="1451"), row(3, 12, 1, goalie=None, empty=1), row(4, 11, 0)]
-    shooters, goalies = shooting_and_goalies(rows, {1: 0.1, 2: 0.3, 3: 0.8})  # event 4 has no xG: skipped
+    rows = [row(1, 11, 0), row(2, 11, 1, situation="1451"), row(3, 12, 1, goalie=None, empty=1), row(4, 11, 0),
+            row(5, 12, 0, on_goal=0)]
+    # Event 4 has no xG: skipped. Event 5 is a high-danger miss: in xG against, not in high-danger shots on goal.
+    shooters, goalies = shooting_and_goalies(rows, {1: 0.1, 2: 0.3, 3: 0.8, 5: 0.2})
     s11 = shooters[11]
     assert (s11.shots, s11.goals, round(s11.ixg, 2), s11.shots_5v5, s11.goals_5v5, round(s11.ixg_5v5, 2)) == (2, 1, 0.4, 1, 0, 0.1)
-    assert (shooters[12].goals, round(shooters[12].ixg, 2)) == (1, 0.8)
+    assert (shooters[12].goals, round(shooters[12].ixg, 2)) == (1, 1.0)
     g = goalies[40]  # the empty-net goal does not count against him
-    assert (g.shots_faced, g.goals_against, round(g.xga, 2)) == (2, 1, 0.4)
+    assert (g.shots_faced, g.goals_against, round(g.xga, 2)) == (3, 1, 0.6)
+    # High danger (xG 0.15+): event 2 (goal, on goal) and event 5 (missed).
+    assert (g.hd_shots, g.hd_goals, round(g.hd_xga, 2)) == (1, 1, 0.5)
+    assert (g.shots_5v5, g.goals_5v5, round(g.xga_5v5, 2)) == (2, 0, 0.3)
 
 
 def test_power_play_and_penalty_kill_xg():

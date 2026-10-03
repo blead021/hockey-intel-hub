@@ -905,7 +905,9 @@ export type TargetFilters = {
 };
 
 // Trade Targets (CLAUDE.md section 7): every player under contract on another team, with projected WAR,
-// surplus value, a performance percentile within his position group, sentiment, and trade chatter.
+// surplus value, a performance percentile within his position group, sentiment, and trade chatter. Players
+// traded, signed, extended, or claimed in the last 120 days (player_recent_moves) are left out: teams do not
+// move a player they just acquired or signed.
 export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters): Promise<TradeTarget[]> {
   const group = f.group ?? null;
   const search = f.search ? `%${f.search.toLowerCase()}%` : null;
@@ -977,6 +979,7 @@ export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters
       and (${f.maxYears ?? null}::int is null or c.end_season / 10000 - ${season} / 10000 + 1 <= ${f.maxYears ?? null})
       and (not ${f.noNmc ?? false} or coalesce(c.clause, '') <> 'NMC')
       and (${search}::text is null or lower(p.first_name || ' ' || p.last_name || ' ' || t.abbrev || ' ' || t.name) like ${search})
+      and not exists (select 1 from player_recent_moves m where m.player_id = p.id)
     order by coalesce(ch.chatter, 0) desc, v.war_proj desc nulls last
     limit 300`;
 }
@@ -1070,4 +1073,237 @@ export async function getTeamCapSpace(sql: Sql, teamId: number): Promise<{ space
   const [row] = await sql<{ space: number; ltir_relief: number }[]>`
     select space::float8 as space, ltir_relief::float8 as ltir_relief from team_cap_space where team_id = ${teamId}`;
   return row;
+}
+
+export type GoalieGame = {
+  game_id: number;
+  game_date: string;
+  opponent: string;
+  home: boolean;
+  result: string;
+  started: boolean;
+  decision: string | null;
+  shots_against: number;
+  saves: number;
+  ga: number;
+  toi_sec: number;
+  xga: number | null;
+  gsax: number | null;
+  hd_shots: number | null;
+  hd_goals: number | null;
+  game_score: number | null;
+};
+
+// A goalie's most recent games, newest first. xGA and GSAx use the season adjustment (xg_season_factor).
+export async function getGoalieLastGames(sql: Sql, playerId: number, limit = 10) {
+  return sql<GoalieGame[]>`
+    select g.id as game_id, to_char(g.game_date, 'YYYY-MM-DD') as game_date,
+           case when g.home_team_id = s.team_id then away.abbrev else home.abbrev end as opponent,
+           g.home_team_id = s.team_id as home,
+           case
+             when (g.home_team_id = s.team_id) = (g.home_score > g.away_score) then 'W'
+             when g.last_period_type = 'REG' then 'L' else 'OTL'
+           end || ' ' || greatest(g.home_score, g.away_score) || '-' || least(g.home_score, g.away_score) as result,
+           s.started, s.decision, s.shots_against, s.saves, s.ga, s.toi_sec,
+           (x.xga * coalesce(f.factor, 1))::float8 as xga,
+           (x.xga * coalesce(f.factor, 1) - x.goals_against)::float8 as gsax,
+           x.hd_shots, x.hd_goals,
+           gs.game_score::float8 as game_score
+    from game_goalie_stats s
+    join games g on g.id = s.game_id
+    left join goalie_game_xg x on x.player_id = s.player_id and x.game_id = s.game_id
+    left join xg_season_factor f on f.season_id = g.season_id
+    left join player_game_score gs on gs.player_id = s.player_id and gs.game_id = s.game_id
+    join teams home on home.id = g.home_team_id
+    join teams away on away.id = g.away_team_id
+    where s.player_id = ${playerId} and s.toi_sec > 0
+    order by g.game_date desc, g.id desc limit ${limit}`;
+}
+
+export type GoalieAdvanced = { season_id: number; gp: number; toi_sec: number; ranked: boolean; metrics: AdvancedMetric[] };
+
+// Season goalie metrics (regular season), with percentiles among goalies who played at least 600 minutes that
+// season. Shows the latest season in which he reached 600 minutes, or his latest season if he never has.
+// Expected goals use the season adjustment. Lower is better for really bad start %; xGA/60 is workload context.
+export async function getGoalieAdvanced(sql: Sql, playerId: number): Promise<GoalieAdvanced | undefined> {
+  const rows = await sql<Record<string, number | null>[]>`
+    with mine as (
+      select coalesce(max(season_id) filter (where toi >= 36000), max(season_id)) as season_id
+      from (select g.season_id, sum(s.toi_sec) as toi from game_goalie_stats s join games g on g.id = s.game_id
+            where s.player_id = ${playerId} and g.game_type = 2 group by g.season_id) t),
+    games_in as (
+      select s.*, g.season_id from game_goalie_stats s join games g on g.id = s.game_id, mine
+      where g.game_type = 2 and g.season_id = mine.season_id and s.toi_sec > 0),
+    league as (select sum(saves)::float8 / nullif(sum(shots_against), 0) as sv from games_in),
+    box as (
+      select player_id, count(*) as gp, sum(toi_sec) as toi, sum(shots_against) as sa, sum(saves) as sv, sum(ga) as ga,
+             sum(ev_shots_against) as ev_sa, sum(ev_ga) as ev_ga,
+             count(*) filter (where started) as starts,
+             count(*) filter (where started and shots_against > 0 and (saves::float8 / shots_against >= league.sv
+               or (shots_against <= 20 and saves::float8 / shots_against >= 0.885))) as quality,
+             count(*) filter (where started and shots_against > 0 and saves::float8 / shots_against < 0.85) as bad
+      from games_in, league group by player_id),
+    xg as (
+      select x.player_id, sum(x.xga) * max(coalesce(f.factor, 1)) as xga, sum(x.goals_against) as xg_ga,
+             sum(x.hd_shots) as hd_shots, sum(x.hd_goals) as hd_goals, sum(x.hd_xga) * max(coalesce(f.factor, 1)) as hd_xga,
+             sum(x.goals_5v5) as ga_5v5, sum(x.xga_5v5) * max(coalesce(f.factor, 1)) as xga_5v5
+      from goalie_game_xg x join games g on g.id = x.game_id, mine
+      left join xg_season_factor f on f.season_id = mine.season_id
+      where g.game_type = 2 and g.season_id = mine.season_id group by x.player_id),
+    m as (
+      select b.player_id, b.gp, b.toi, b.toi >= 36000 as ranked,
+             b.sv::float8 / nullif(b.sa, 0) as sv_pct,
+             (x.xga - x.xg_ga)::float8 as gsax,
+             (x.xga - x.xg_ga)::float8 * 3600 / nullif(b.toi, 0) as gsax60,
+             1 - x.hd_goals::float8 / nullif(x.hd_shots, 0) as hdsv_pct,
+             (x.hd_xga - x.hd_goals)::float8 as hd_gsax,
+             (x.xga_5v5 - x.ga_5v5)::float8 as gsax_5v5,
+             1 - b.ev_ga::float8 / nullif(b.ev_sa, 0) as ev_sv_pct,
+             b.quality::float8 / nullif(b.starts, 0) as qs_pct,
+             b.bad::float8 / nullif(b.starts, 0) as bad,
+             x.xga::float8 * 3600 / nullif(b.toi, 0) as xga60
+      from box b left join xg x using (player_id)),
+    ranked as (
+      select m.*,
+        ${sql.unsafe(["sv_pct", "gsax", "gsax60", "hdsv_pct", "hd_gsax", "gsax_5v5", "ev_sv_pct", "qs_pct", "xga60"]
+          .map((c) => `case when ranked and ${c} is not null then percent_rank() over (partition by ranked, ${c} is null order by ${c}) end as p_${c}`)
+          .join(", "))},
+        case when ranked then percent_rank() over (partition by ranked order by bad desc) end as p_bad
+      from m)
+    select r.*, mine.season_id from ranked r, mine where r.player_id = ${playerId}`;
+  const r = rows[0];
+  if (!r) return undefined;
+  const m = (key: string, value: number | null, pctile: number | null) => ({ key, value, pctile });
+  return {
+    season_id: r.season_id as number,
+    gp: Number(r.gp),
+    toi_sec: Number(r.toi),
+    ranked: Boolean(r.ranked),
+    metrics: [
+      m("SV%", r.sv_pct, r.p_sv_pct),
+      m("GSAx", r.gsax, r.p_gsax),
+      m("GSAx/60", r.gsax60, r.p_gsax60),
+      m("HDSV%", r.hdsv_pct, r.p_hdsv_pct),
+      m("HD GSAx", r.hd_gsax, r.p_hd_gsax),
+      m("5v5 GSAx", r.gsax_5v5, r.p_gsax_5v5),
+      m("EV SV%", r.ev_sv_pct, r.p_ev_sv_pct),
+      m("Quality start %", r.qs_pct, r.p_qs_pct),
+      m("Really bad start %", r.bad, r.p_bad),
+      m("xGA/60", r.xga60, r.p_xga60),
+    ],
+  };
+}
+
+export type FutureContract = {
+  team: string;
+  cap_hit: number | null;
+  start_season: number | null;
+  end_season: number;
+  expiry_status: string | null;
+  clause: string | null;
+  no_trade_list_size: number | null;
+  retained_pct: number;
+  ceilings: Record<string, number> | null;
+};
+
+// Every contract still to be played, in order (the current deal and any extension), with the cap ceiling of each
+// season it covers where one is set.
+export async function getPlayerContracts(sql: Sql, playerId: number, season: number): Promise<FutureContract[]> {
+  return sql<FutureContract[]>`
+    select t.abbrev as team, c.cap_hit::float8 as cap_hit, c.start_season, c.end_season, c.expiry_status, c.clause,
+           c.no_trade_list_size, coalesce(c.retained_pct, 0)::float8 as retained_pct,
+           (select json_object_agg(l.season_id, l.cap_ceiling::float8) from cap_limits l
+             where l.season_id between greatest(coalesce(c.start_season, ${season}), ${season}) and c.end_season) as ceilings
+    from contracts c join teams t on t.id = c.team_id
+    where c.player_id = ${playerId} and c.status = 'active' and c.end_season >= ${season}
+    order by c.start_season nulls first, c.end_season`;
+}
+
+export type FutureCapRow = {
+  player_id: number | null;
+  name: string;
+  position: string;
+  retained: boolean;
+  end_season: number;
+  expiry_status: string | null;
+  clause: string | null;
+  by_season: Record<string, number | null>;
+};
+
+// A team's signed cap hits for this season and the next few: each contract after retention, plus salary it
+// retained on players it traded. Unknown cap hits come back as null. Ceilings for the seasons that have one.
+export async function getTeamFutureCap(sql: Sql, teamId: number, season: number, years = 5) {
+  const rows = await sql<FutureCapRow[]>`
+    with s as (
+      select (${season} / 10000 + i) * 10000 + ${season} / 10000 + i + 1 as season_id from generate_series(0, ${years - 1}) i),
+    held as (
+      select c.player_id, coalesce(p.first_name || ' ' || p.last_name, c.player_name) as name,
+             coalesce(p.position, '') as position, false as retained, s.season_id,
+             (c.cap_hit * (1 - coalesce(c.retained_pct, 0) / 100))::float8 as charge, c.end_season, c.expiry_status, c.clause
+      from contracts c join s on s.season_id between coalesce(c.start_season, ${season}) and c.end_season
+      left join players p on p.id = c.player_id
+      where c.status = 'active' and c.team_id = ${teamId}
+      union all
+      select c.player_id, coalesce(p.first_name || ' ' || p.last_name, c.player_name), coalesce(p.position, ''), true, s.season_id,
+             (c.cap_hit * c.retained_pct / 100)::float8, c.end_season, null, null
+      from contracts c join s on s.season_id between coalesce(c.start_season, ${season}) and c.end_season
+      left join players p on p.id = c.player_id
+      where c.status = 'active' and c.retained_by = ${teamId} and c.retained_pct > 0)
+    select player_id, name, position, retained, max(end_season) as end_season,
+           (array_agg(expiry_status order by end_season desc))[1] as expiry_status,
+           (array_agg(clause order by end_season desc))[1] as clause,
+           json_object_agg(season_id, charge) as by_season
+    from held group by player_id, name, position, retained
+    order by retained, case when position = 'G' then 3 when position = 'D' then 2 else 1 end, name`;
+  const seasons = Array.from({ length: years }, (_, i) => {
+    const y = Math.floor(season / 10000) + i;
+    return y * 10000 + y + 1;
+  });
+  const ceilings = new Map<number, number>(
+    (await sql<{ season_id: number; cap_ceiling: number }[]>`
+      select season_id, cap_ceiling::float8 as cap_ceiling from cap_limits where season_id in ${sql(seasons)}`).map(
+      (r) => [Number(r.season_id), Number(r.cap_ceiling)]));
+  return { seasons, rows, ceilings };
+}
+
+
+export type ComparableItem = { to: string; kind: "player" | "pick"; name: string; player_id: number | null; position: string | null;
+  age: number | null; cap_hit: number | null; war_rate: number | null };
+export type ComparableTrade = { trade_id: number; traded_on: string; for_id: number; for_name: string; match_name: string;
+  match_id: number | null; dist: number; items: ComparableItem[] };
+
+// Past trades of players like the ones in a deal (past_trades, built nightly): same position group (forward,
+// defense, goalie), close in age, cap hit, and WAR. Distance: 4 years of age, a 50% difference in cap hit (on a log
+// scale), or 1.5 WAR per 82 games each count as 1; an unknown cap hit or WAR counts as 1. Up to three per player.
+export async function getComparableTrades(sql: Sql, playerIds: number[]): Promise<ComparableTrade[]> {
+  if (!playerIds.length) return [];
+  return sql<ComparableTrade[]>`
+    with me as (
+      select p.id, p.first_name || ' ' || p.last_name as name,
+             case when p.position = 'D' then 'D' when p.position = 'G' then 'G' else 'F' end as grp,
+             date_part('year', age(p.birth_date))::int as age,
+             (select c.cap_hit::float8 from contracts c where c.player_id = p.id and c.status = 'active'
+                and (select max(season_id) from games where game_type = 2) between coalesce(c.start_season, 0) and c.end_season
+              order by c.end_season limit 1) as cap,
+             (select v.war_proj::float8 from player_value v where v.player_id = p.id order by v.as_of desc limit 1) as war
+      from players p where p.id in ${sql(playerIds)}),
+    cand as (
+      select me.id as for_id, me.name as for_name, i.trade_id, i.player_id as match_id, i.name as match_name,
+             abs(coalesce(i.age, me.age + 4) - coalesce(me.age, i.age, 0)) / 4.0
+             + case when i.cap_hit > 0 and me.cap > 0 then abs(ln(i.cap_hit::float8 / me.cap)) / ln(1.5) else 1 end
+             + case when i.war_rate is not null and me.war is not null then abs(i.war_rate::float8 - me.war) / 1.5 else 1 end as dist
+      from me join past_trade_items i on i.kind = 'player' and i.player_id is distinct from me.id
+        and case when i.position = 'D' then 'D' when i.position = 'G' then 'G' when i.position is null then null else 'F' end = me.grp),
+    -- Only trades where we know what went each way; a one-sided record would misstate the price.
+    ranked as (select *, row_number() over (partition by for_id order by dist) as rn from cand
+               where (select count(distinct to_team_id) from past_trade_items x where x.trade_id = cand.trade_id) = 2)
+    select r.for_id, r.for_name, r.match_id, r.match_name, r.dist::float8 as dist, t.id as trade_id,
+           to_char(t.traded_on, 'YYYY-MM-DD') as traded_on,
+           (select json_agg(json_build_object('to', tm.abbrev, 'kind', i.kind, 'name', i.name, 'player_id', i.player_id,
+                    'position', i.position, 'age', i.age, 'cap_hit', i.cap_hit::float8, 'war_rate', i.war_rate::float8)
+                    order by tm.abbrev, i.kind desc, i.cap_hit desc nulls last)
+            from past_trade_items i join teams tm on tm.id = i.to_team_id where i.trade_id = t.id) as items
+    from ranked r join past_trades t on t.id = r.trade_id
+    where r.rn <= 3 and r.dist <= 3
+    order by r.dist`;
 }

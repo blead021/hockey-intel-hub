@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { Unavailable } from "@/components/ui";
+import { Info, Unavailable } from "@/components/ui";
+import { definition } from "@/lib/glossary";
 import { withDb } from "@/lib/db";
 import { money } from "@/lib/format";
 import { availability, isBuyLow, needFit, NEED_LABELS, unlikelyAvailable } from "@/lib/needs";
@@ -228,6 +229,9 @@ export default async function TradeTargetsPage({ searchParams }: PageProps<"/tra
                       <Link href={sortHref(key)} className={`hover:text-ink ${active ? "text-ink" : ""}`}>
                         {SORTS[key].label}{active ? (asc ? " ▲" : " ▼") : ""}
                       </Link>
+                      {definition(SORTS[key].label) && (
+                        <Info text={definition(SORTS[key].label)!} align={i < columns.length / 2 ? "left" : "right"} />
+                      )}
                     </th>
                   );
                 })}
@@ -277,8 +281,8 @@ export default async function TradeTargetsPage({ searchParams }: PageProps<"/tra
           leaning on last season until a team has played enough games): top 10 Contender, bottom 10 Seller once teams have played 20 games (Bubble before that). A
           contender&apos;s six best players by projected WAR are marked Core and shown faded, since contenders rarely move
           them. Cap fit is the share of salary the selling team would need to retain (50% maximum). Fills is his
-          percentile at his position in the team&apos;s weakest category he helps. WAR is PuckSleuth&apos;s projection per 82
-          games; Surplus compares the cap hit with our market estimate. Buy-low: his underlying play (5v5 expected goals
+          percentile at his position in the team&apos;s weakest category he helps. WAR is PuckSleuth&apos;s projection per 84
+          games; Surplus compares the cap hit with our market estimate (hover the i next to Surplus for how it is calculated). Players traded, signed, extended, or claimed off waivers in the last 120 days are left out. Buy-low: his underlying play (5v5 expected goals
           share and chance quality) ranks well above his results (goal share and points), with bad luck behind the gap.
         </p>
       </section>
@@ -294,7 +298,7 @@ export default async function TradeTargetsPage({ searchParams }: PageProps<"/tra
         )}
         {contractYear && (
           <Alert tone="neutral" kind="Contract year" title={`${contractYear.name}, ${contractYear.expiry_status ?? "free agent"} next summer`}
-            text={`Projected ${contractYear.war_proj?.toFixed(1) ?? "—"} WAR per 82 at age ${contractYear.age}, on ${money(contractYear.cap_hit)}.`} id={contractYear.player_id} />
+            text={`Projected ${contractYear.war_proj?.toFixed(1) ?? "—"} WAR per season at age ${contractYear.age}, on ${money(contractYear.cap_hit)}.`} id={contractYear.player_id} />
         )}
       </div>
     </main>

@@ -1,5 +1,43 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { definition } from "@/lib/glossary";
+
+// A small "i" next to a label; hovering (or tapping, on a phone) shows what the label means. Pure CSS, so it works
+// on server-rendered pages. align says which way the box opens: "right" anchors it to the icon's right edge, for
+// labels near the right side of a table.
+export function Info({ text, align = "left" }: { text: string; align?: "left" | "right" }) {
+  return (
+    <span className="group relative ml-1 inline-flex align-middle font-normal normal-case tracking-normal">
+      <button
+        type="button"
+        aria-label={text}
+        className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-current text-[9px] font-semibold leading-none text-muted hover:text-ink focus:text-ink focus:outline-none"
+      >
+        i
+      </button>
+      <span
+        role="tooltip"
+        className={`pointer-events-none absolute top-full z-40 mt-1.5 hidden ${text.length > 300 ? "w-96" : "w-60"} max-w-[80vw] whitespace-normal rounded-md bg-ink px-3 py-2 text-left text-xs leading-snug text-surface shadow-lg group-focus-within:block group-hover:block ${
+          align === "right" ? "right-0" : "left-0"
+        }`}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// A label followed by its "i" when the glossary defines it. term picks a different glossary entry than the
+// visible text, for labels that mean different things in different tables.
+export function Label({ text, term, align }: { text: ReactNode; term?: string; align?: "left" | "right" }) {
+  const def = definition(term ?? (typeof text === "string" ? text : undefined));
+  return (
+    <>
+      {text}
+      {def && <Info text={def} align={align} />}
+    </>
+  );
+}
 
 export function PageTitle({ eyebrow, title, children }: { eyebrow?: ReactNode; title: ReactNode; children?: ReactNode }) {
   return (
@@ -20,10 +58,10 @@ export function SectionTitle({ children, note }: { children: ReactNode; note?: R
   );
 }
 
-export function StatCard({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }) {
+export function StatCard({ label, value, detail, term }: { label: string; value: ReactNode; detail?: ReactNode; term?: string }) {
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted"><Label text={label} term={term} /></p>
       <p className="mt-1 font-mono text-2xl font-medium">{value}</p>
       {detail && <p className="mt-1 text-xs text-muted">{detail}</p>}
     </div>
@@ -43,14 +81,14 @@ export function DataTable({ children }: { children: ReactNode }) {
   );
 }
 
-export function Th({ children, left }: { children?: ReactNode; left?: boolean }) {
+export function Th({ children, left, term }: { children?: ReactNode; left?: boolean; term?: string }) {
   return (
     <th
       className={`border-b border-border bg-surface px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted ${
         left ? "sticky left-0 z-10 text-left" : "text-right"
       }`}
     >
-      {children}
+      <Label text={children} term={term} align={left ? "left" : "right"} />
     </th>
   );
 }

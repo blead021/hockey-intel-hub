@@ -309,6 +309,12 @@ class GoalieXg:
     shots_faced: int = 0
     goals_against: int = 0
     xga: float = 0.0
+    hd_shots: int = 0  # high-danger (xG of 0.15 or more) shots on goal, for high-danger save %
+    hd_goals: int = 0
+    hd_xga: float = 0.0  # xG of all unblocked high-danger shots, like xga
+    shots_5v5: int = 0
+    goals_5v5: int = 0
+    xga_5v5: float = 0.0
 
 
 def shooting_and_goalies(rows, xg_by_event: dict[int, float]) -> tuple[dict[int, Shooting], dict[int, GoalieXg]]:
@@ -333,6 +339,14 @@ def shooting_and_goalies(rows, xg_by_event: dict[int, float]) -> tuple[dict[int,
             g.shots_faced += 1
             g.goals_against += r.is_goal
             g.xga += xg
+            if xg >= xg_score.HIGH_DANGER:
+                g.hd_shots += r.on_goal
+                g.hd_goals += r.is_goal
+                g.hd_xga += xg
+            if r.situation == FIVE_ON_FIVE:
+                g.shots_5v5 += 1
+                g.goals_5v5 += r.is_goal
+                g.xga_5v5 += xg
     return shooters, goalies
 
 
@@ -408,9 +422,11 @@ def store(conn, game_id: int, result: GameResult, shooters: dict | None = None, 
                       st.shots_mid, st.shots_perimeter) for pid, st in (styles or {}).items()],
                 )
                 cur.executemany(
-                    """insert into goalie_game_xg (player_id, game_id, team_id, shots_faced, goals_against, xga)
-                       values (%s, %s, %s, %s, %s, %s)""",
-                    [(pid, game_id, g.team_id, g.shots_faced, g.goals_against, round(g.xga, 3))
+                    """insert into goalie_game_xg (player_id, game_id, team_id, shots_faced, goals_against, xga,
+                           hd_shots, hd_goals, hd_xga, shots_5v5, goals_5v5, xga_5v5)
+                       values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [(pid, game_id, g.team_id, g.shots_faced, g.goals_against, round(g.xga, 3), g.hd_shots,
+                      g.hd_goals, round(g.hd_xga, 3), g.shots_5v5, g.goals_5v5, round(g.xga_5v5, 3))
                      for pid, g in (goalies or {}).items()],
                 )
         conn.execute("update games set onice_loaded_at = now(), xg_version = %s where id = %s", (xg_version, game_id))

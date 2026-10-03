@@ -24,7 +24,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
-  description: "Front office tools for hockey fans: stats, analytics, sentiment, trade chatter, and contracts.",
+  description: "Stats, Analytics, and Sentiment to help find the hidden gems around the league.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

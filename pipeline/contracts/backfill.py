@@ -264,20 +264,34 @@ def release(conn) -> None:
 def reapply_unmatched(conn, counts) -> None:
     """Re-applies backfill events skipped because the player could not be matched, from the details Claude
     already extracted (no new Claude cost), under the same backfill rules. Run after improving matching."""
+    _reapply(conn, counts, "skipped_unmatched", backfill_only=True)
+
+
+def reapply_extensions(conn, counts) -> None:
+    """Re-applies extensions skipped as already on file under the old rule (an extension is a new contract after
+    the current one), from details already extracted (no new Claude cost). Reports stating figures go first, so
+    a vaguer report of the same deal cannot add it without a cap hit."""
+    _reapply(conn, counts, "skipped_on_file", backfill_only=False, event_type="extension")
+
+
+def _reapply(conn, counts, outcome: str, backfill_only: bool, event_type: str | None = None) -> None:
     from pipeline.contracts.apply import Applier
 
     teams = dict(conn.execute("select abbrev, id from teams where active").fetchall())
     applier = Applier(conn, None, "reapply", teams, create_only=True)
     rows = conn.execute(
         """select e.id, e.details, e.news_ids, e.source_urls from contract_events e
-           where e.outcome = 'skipped_unmatched' and exists (
-             select 1 from contract_news n where n.id = any(e.news_ids) and n.query like 'backfill%%')"""
+           where e.outcome = %s and (%s::text is null or e.event_type = %s)
+             and (not %s or exists (
+               select 1 from contract_news n where n.id = any(e.news_ids) and n.query like 'backfill%%'))
+           order by (e.details->>'cap_hit') is null and (e.details->>'total_value') is null, e.id""",
+        (outcome, event_type, event_type, backfill_only),
     ).fetchall()
     for event_id, details, news_ids, urls in rows:
         news = [{"id": i, "url": u} for i, u in zip(news_ids, urls or [None] * len(news_ids))]
-        outcome = applier.apply(details, news)
-        conn.execute("update contract_events set outcome = 'skipped_unmatched_retried' where id = %s", (event_id,))
-        counts[f"reapplied_{outcome}"] += 1
+        result = applier.apply(details, news)
+        conn.execute(f"update contract_events set outcome = '{outcome}_retried' where id = %s", (event_id,))
+        counts[f"reapplied_{result}"] += 1
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -290,6 +304,7 @@ def main(argv: list[str] | None = None) -> None:
     mode.add_argument("--picks", action="store_true", help="draft pick trades since mid-2023 (free)")
     parser.add_argument("--any-date", action="store_true", help="with --status: search all dates (long-term injuries)")
     mode.add_argument("--reapply", action="store_true", help="retry unmatched backfill events without Claude")
+    mode.add_argument("--reapply-extensions", action="store_true", help="retry extensions skipped as on file (free)")
     mode.add_argument("--estimate", action="store_true")
     mode.add_argument("--release", action="store_true")
     args = parser.parse_args(argv)
@@ -314,6 +329,11 @@ def main(argv: list[str] | None = None) -> None:
             search_offseason(conn, http, counts)
             check_players(conn, http, counts)
             print(f"check search ok: {dict(counts)}")
+    if args.reapply_extensions:
+        with job_run("contract_backfill_reapply_extensions") as counts, connect(autocommit=True) as conn:
+            reapply_extensions(conn, counts)
+            print(f"reapply extensions ok: {dict(counts)}")
+        return
     if args.reapply:
         with job_run("contract_backfill_reapply") as counts, connect(autocommit=True) as conn:
             reapply_unmatched(conn, counts)

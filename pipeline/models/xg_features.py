@@ -45,6 +45,7 @@ class ShotRow:
     is_goal: int
     situation: str
     features: dict
+    on_goal: int = 1  # 0 for a missed shot (goals and saves are on goal)
 
 
 def attacking_goal_x(shooting_is_home: bool, home_defends: str | None) -> int | None:
@@ -140,7 +141,7 @@ def shot_rows(pbp: dict) -> list[ShotRow]:
                         game_id=pbp["id"], event_id=play.get("eventId"), shooter_id=shooter,
                         goalie_id=details.get("goalieInNetId"), shooting_team=shooting,
                         defending_team=away if is_home else home, is_goal=int(kind == "goal"),
-                        situation=play["situationCode"], features=features,
+                        situation=play["situationCode"], features=features, on_goal=int(kind != "missed-shot"),
                     ))
 
         if kind == "goal":

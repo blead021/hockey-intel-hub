@@ -5,7 +5,7 @@ Usage:
 
 Each category uses one metric. Teams are z-scored across the league (higher always means better) and
 mapped to grades: z <= -1.0 Need (-2), below -0.4 Thin (-1), within 0.4 Average (0), up to 1.0 Solid (1),
-1.0 or more Surplus (2). Until every team has played 20 games this season, last season's games are
+1.0 or more Strong (2). Until every team has played 20 games this season, last season's games are
 included too, so the first weeks do not swing grades. Prospect depth has no data source yet and is not graded.
 """
 

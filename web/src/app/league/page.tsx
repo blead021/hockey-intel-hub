@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { Panel, Unavailable } from "@/components/ui";
+import { Label, Panel, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
 import { money, shortDate } from "@/lib/format";
 import { availability, NEED_LABELS, unlikelyAvailable } from "@/lib/needs";
@@ -9,7 +9,7 @@ import { currentSeason } from "@/lib/seasons";
 
 export const metadata = { title: "League overview" };
 
-// Grid columns in the Design/ screenshot order. Prospect depth has no data source yet.
+// Grid columns in the Design/ screenshot order. Prospect depth is left out (Brian, 2026-10-03): no data source grades it.
 const COLUMNS: { key: string; label: string; name: string }[] = [
   { key: "goal_scoring", label: "Goals", name: "Goal scoring" },
   { key: "playmaking", label: "Creation", name: "Playmaking" },
@@ -18,7 +18,6 @@ const COLUMNS: { key: string; label: string; name: string }[] = [
   { key: "power_play", label: "PP", name: "Power play" },
   { key: "penalty_kill", label: "PK", name: "Penalty kill" },
   { key: "goaltending", label: "Goalie", name: "Goaltending" },
-  { key: "prospects", label: "Prospects", name: "Prospect depth" },
 ];
 
 const GRADES: Record<number, { label: string; cls: string }> = {
@@ -26,7 +25,7 @@ const GRADES: Record<number, { label: string; cls: string }> = {
   [-1]: { label: "Thin", cls: "bg-negative-soft text-negative" },
   0: { label: "", cls: "bg-border-soft" },
   1: { label: "Solid", cls: "bg-positive-soft text-positive" },
-  2: { label: "Surplus", cls: "bg-positive text-surface" },
+  2: { label: "Strong", cls: "bg-positive text-surface" },
 };
 
 const BIG_SPACE = 8_000_000;
@@ -51,7 +50,7 @@ export default async function LeaguePage({ searchParams }: PageProps<"/league">)
   const rows = conference ? all.filter((r) => r.conference === conference) : all;
 
   // Summary cards count across the teams shown.
-  const counts = COLUMNS.filter((c) => c.key !== "prospects").map((c) => ({
+  const counts = COLUMNS.map((c) => ({
     ...c,
     weak: rows.filter((r) => (r.grades[c.key] ?? 0) < 0).length,
     strong: rows.filter((r) => (r.grades[c.key] ?? 0) > 0).length,
@@ -85,19 +84,23 @@ export default async function LeaguePage({ searchParams }: PageProps<"/league">)
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Summary label="Most common need" value={byNeed[0]?.name} tone="negative" detail={`${byNeed[0]?.weak ?? 0} teams graded Need or Thin`} />
         <Summary label="Second most common need" value={byNeed[1]?.name} tone="negative" detail={`${byNeed[1]?.weak ?? 0} teams graded Need or Thin`} />
-        <Summary label="Deepest league-wide" value={deepest?.name} tone="positive" detail={`${deepest?.strong ?? 0} teams graded Solid or Surplus`} />
+        <Summary label="Deepest league-wide" value={deepest?.name} tone="positive" detail={`${deepest?.strong ?? 0} teams graded Solid or Strong`} />
         <Summary label={`Teams with ${money(BIG_SPACE)}+ space`} value={String(buyers)} detail="Buyers with room to absorb a contract" />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <Panel title="Team needs & surpluses" note="Built from each roster's results">
+        <Panel title="Team needs & strengths" note="Built from each roster's results">
           <div className="overflow-x-auto">
             <table className="w-full min-w-max border-separate border-spacing-1 text-sm">
               <thead>
                 <tr className="text-xs font-semibold uppercase tracking-wide text-muted">
                   <th className="pr-2 text-left">Team</th>
-                  {COLUMNS.map((c) => <th key={c.key} className="px-1 text-center">{c.label}</th>)}
-                  <th className="pl-2 text-right">Space</th>
+                  {COLUMNS.map((c, i) => (
+                    <th key={c.key} className="px-1 text-center">
+                      <Label text={c.label} term={`${c.label} (grade)`} align={i >= COLUMNS.length / 2 ? "right" : "left"} />
+                    </th>
+                  ))}
+                  <th className="pl-2 text-right"><Label text="Space" align="right" /></th>
                 </tr>
               </thead>
               <tbody>
@@ -116,7 +119,7 @@ export default async function LeaguePage({ searchParams }: PageProps<"/league">)
           <p className="mt-3 text-xs text-muted">
             Goals: goals for per game. Creation: primary assists per game. Physical: hits and blocked shots per game.
             5v5 D: expected goals against per 60 at 5v5. PP and PK: NHL power play and penalty kill percentages.
-            Goalie: goals saved above expected per game. Prospect depth is not graded yet. Grades compare each team
+            Goalie: goals saved above expected per game. Grades compare each team
             with the other 31{sample ? `, using the ${sample}` : ""}. Space is the cap ceiling minus NHL roster
             cap hits and retained salary.
           </p>
@@ -141,7 +144,7 @@ function Summary({ label, value, detail, tone }: { label: string; value: string 
   const color = tone === "negative" ? "text-negative" : tone === "positive" ? "text-positive" : "";
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted"><Label text={label} /></p>
       <p className={`mt-1 font-heading text-3xl font-semibold ${color}`}>{value ?? "—"}</p>
       <p className="mt-1 text-xs text-muted">{detail}</p>
     </div>
@@ -188,9 +191,9 @@ function TargetsTable({ rows, grid }: { rows: TradeTarget[]; grid: LeagueRow[] }
       <table className="w-full min-w-max border-collapse text-sm">
         <thead>
           <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
-            <th className="py-2 pr-2 text-left">#</th><th className="py-2 text-left">Player</th><th className="px-2 py-2 text-right">Cap / yrs</th>
-            <th className="px-2 py-2 text-right">Chatter</th><th className="px-2 py-2 text-right">Fans</th><th className="px-2 py-2 text-right">Beat</th>
-            <th className="py-2 pl-2 text-left">Best fits</th>
+            <th className="py-2 pr-2 text-left">#</th><th className="py-2 text-left">Player</th><th className="px-2 py-2 text-right"><Label text="Cap / yrs" align="right" /></th>
+            <th className="px-2 py-2 text-right"><Label text="Chatter" align="right" /></th><th className="px-2 py-2 text-right"><Label text="Fans" align="right" /></th><th className="px-2 py-2 text-right"><Label text="Beat" align="right" /></th>
+            <th className="py-2 pl-2 text-left"><Label text="Best fits" align="right" /></th>
           </tr>
         </thead>
         <tbody>
@@ -229,9 +232,9 @@ function UndervaluedTable({ rows }: { rows: Undervalued[] }) {
       <table className="w-full min-w-max border-collapse text-sm">
         <thead>
           <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
-            <th className="py-2 pr-2 text-left">#</th><th className="py-2 text-left">Player</th><th className="px-2 py-2 text-right">Cap</th>
-            <th className="px-2 py-2 text-right">Fans</th><th className="px-2 py-2 text-right">Perf.</th>
-            <th className="px-2 py-2 text-left">Perception gap</th><th className="py-2 pl-2 text-right">Surplus</th>
+            <th className="py-2 pr-2 text-left">#</th><th className="py-2 text-left">Player</th><th className="px-2 py-2 text-right"><Label text="Cap" term="Cap hit" align="right" /></th>
+            <th className="px-2 py-2 text-right"><Label text="Fans" align="right" /></th><th className="px-2 py-2 text-right"><Label text="Perf." align="right" /></th>
+            <th className="px-2 py-2 text-left"><Label text="Perception gap" align="left" /></th><th className="py-2 pl-2 text-right"><Label text="Surplus" align="right" /></th>
           </tr>
         </thead>
         <tbody>

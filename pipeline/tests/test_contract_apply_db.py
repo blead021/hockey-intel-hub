@@ -206,3 +206,26 @@ def test_draft_picks_move_with_trades_and_never_back(conn, setup):
     assert owner(2027, 2, team)[0] == teams[third]
     # A pick with no year stated is not guessed.
     assert applier.apply(pick(team=other, from_team=team, draft_year=None, round=3), day(21)) == "skipped_unmatched"
+
+
+def test_backfill_adds_a_new_extension_but_not_the_deal_already_on_file(conn, setup):
+    from datetime import datetime
+
+    from pipeline.contracts.apply import Applier
+
+    _, player_id, name, team, _, teams = setup
+    backfill = Applier(conn, None, "test", teams, create_only=True)
+
+    def news(day):
+        return [{"id": "gn:test", "url": "https://news.example/item", "published_at": datetime.fromisoformat(day)}]
+
+    # On file: 2023-24 to 2026-27. A March 2023 extension headline describes that deal (it began 2023-24).
+    old = _t(type="extension", player_name=name, team=team, total_value=20_000_000, years=4)
+    assert backfill.apply(old, news("2023-03-01")) == "skipped_on_file"
+    # A September 2026 extension is new: it begins after the current deal ends.
+    new = _t(type="extension", player_name=name, team=team, total_value=75_000_000, years=6)
+    assert backfill.apply(new, news("2026-09-28")) == "applied"
+    rows = _contracts(conn, player_id)
+    assert [(r[0], r[1], r[2]) for r in rows] == [(20232024, 20262027, 5000000), (20272028, 20322033, 12500000)]
+    # A second headline about the same extension the next day finds it on file.
+    assert backfill.apply(_t(type="extension", player_name=name, team=team), news("2026-09-29")) == "skipped_on_file"

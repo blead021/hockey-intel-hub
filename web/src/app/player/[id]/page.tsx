@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 import { PlayStyleSection } from "@/components/play-style";
-import { DataTable, Panel, Td, Th, Unavailable } from "@/components/ui";
+import { DataTable, Label, Panel, Td, Th, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
 import { faceoffPct, heightFt, money, num, pct, season as seasonLabel, shortDate, signed, svPct, toi } from "@/lib/format";
 import {
@@ -20,6 +20,12 @@ import {
   getAgingCurve,
   getSkaterAdvanced,
   getSkaterLastGames,
+  getGoalieLastGames,
+  getGoalieAdvanced,
+  getPlayerContracts,
+  type FutureContract,
+  type GoalieGame,
+  type GoalieAdvanced,
   getSkaterSeasons,
   getXgfBySeason,
   type Contract,
@@ -62,11 +68,11 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
       ? (await sql<{ s: number | null }[]>`select max(g.season_id) as s from player_game_score gs join games g on g.id = gs.game_id where gs.player_id = ${id} and g.game_type = 2`)[0]?.s
       : oniceSeason;
     const grp: "F" | "D" | "G" = isGoalie ? "G" : player.position === "D" ? "D" : "F";
-    const [skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve] =
+    const [skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve, goalieGames, goalieAdvanced, futureContracts] =
       await Promise.all([
         isGoalie ? Promise.resolve([]) : getSkaterSeasons(sql, id),
         isGoalie ? getGoalieSeasons(sql, id) : Promise.resolve([]),
-        isGoalie ? Promise.resolve([]) : getSkaterLastGames(sql, id),
+        isGoalie ? Promise.resolve([]) : getSkaterLastGames(sql, id, 10),
         getCurrentContract(sql, id, season),
         getCapCeiling(sql, season),
         isGoalie ? Promise.resolve(undefined) : getLatestEdge(sql, id),
@@ -77,28 +83,44 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
         isGoalie ? Promise.resolve(new Map<number, number>()) : getXgfBySeason(sql, id),
         getPlayerValue(sql, id),
         getAgingCurve(sql, grp),
+        isGoalie ? getGoalieLastGames(sql, id, 10) : Promise.resolve([] as GoalieGame[]),
+        isGoalie ? getGoalieAdvanced(sql, id) : Promise.resolve(undefined),
+        getPlayerContracts(sql, id, season),
       ]);
-    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve };
+    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve, goalieGames, goalieAdvanced, futureContracts };
   });
   if (!data) notFound();
-  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve } = data;
+  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve, goalieGames, goalieAdvanced, futureContracts } = data;
 
   return (
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
-      <Header player={player} contract={sources.has("contracts_csv") ? contract : undefined} ceiling={ceiling} showContract={sources.has("contracts_csv")} value={value} />
+      <Header player={player} contract={sources.has("contracts_csv") ? contract : undefined} ceiling={ceiling} showContract={sources.has("contracts_csv")} value={value}
+        next={contract ? futureContracts.find((c) => (c.start_season ?? 0) > contract.end_season) : undefined} />
 
       {isGoalie ? (
         <>
           <GoalieCards seasons={goalieSeasons} current={season} />
-          <GoalieSeasons seasons={goalieSeasons} />
-          <GameScorePanel breakdown={breakdown} />
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
+            <div className="min-w-0 space-y-6">
+              <GoalieGameLog games={goalieGames.slice(0, 5)} />
+              <GoalieAdvancedPanel advanced={goalieAdvanced} />
+              <GameScorePanel breakdown={breakdown} />
+              <GoalieSeasons seasons={goalieSeasons} />
+            </div>
+            <div className="min-w-0 space-y-6">
+              <SentimentPanel />
+              <RecentGameScores games={goalieGames} />
+              <AgeCurvePanel curve={curve} age={player.age} contract={contract} position={player.position} />
+              {sources.has("contracts_csv") && <FutureCapPanel contracts={futureContracts} season={season} />}
+            </div>
+          </div>
         </>
       ) : (
         <>
           <SkaterCards seasons={skaterSeasons} current={season} xgf={xgf} />
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
             <div className="min-w-0 space-y-6">
-              <GameLog games={lastGames} />
+              <GameLog games={lastGames.slice(0, 5)} />
               <AdvancedPanel advanced={advanced} position={player.position} />
               <PlayStyleSection style={style} />
               <GameScorePanel breakdown={breakdown} />
@@ -106,8 +128,10 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
             </div>
             <div className="min-w-0 space-y-6">
               <SentimentPanel />
-              <AgeCurvePanel curve={curve} age={player.age} contract={contract} position={player.position} />
+              <RecentGameScores games={lastGames} />
               {sources.has("nhl_edge") && <SkatingPanel edge={edge} />}
+              <AgeCurvePanel curve={curve} age={player.age} contract={contract} position={player.position} />
+              {sources.has("contracts_csv") && <FutureCapPanel contracts={futureContracts} season={season} />}
             </div>
           </div>
         </>
@@ -116,7 +140,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
   );
 }
 
-function Header({ player, contract, ceiling, showContract, value }: { player: Player; contract: Contract | undefined; ceiling: number | null; showContract: boolean; value: PlayerValue | undefined }) {
+function Header({ player, contract, ceiling, showContract, value, next }: { player: Player; contract: Contract | undefined; ceiling: number | null; showContract: boolean; value: PlayerValue | undefined; next?: FutureContract }) {
   const isGoalie = player.position === "G";
   const eyebrow = [
     player.team_name ?? "Not on an NHL roster",
@@ -150,13 +174,17 @@ function Header({ player, contract, ceiling, showContract, value }: { player: Pl
           <p className="text-sm text-muted">{bio.join(" · ")}</p>
         </div>
       </div>
-      {showContract && <ContractBoxes contract={contract} ceiling={ceiling} value={value} />}
+      {showContract && <ContractBoxes contract={contract} ceiling={ceiling} value={value} next={next} />}
     </section>
   );
 }
 
-function ContractBoxes({ contract, ceiling, value }: { contract: Contract | undefined; ceiling: number | null; value: PlayerValue | undefined }) {
+function ContractBoxes({ contract, ceiling, value, next }: { contract: Contract | undefined; ceiling: number | null; value: PlayerValue | undefined; next?: FutureContract }) {
   if (!contract) return <p className="text-sm text-muted">No contract on file.</p>;
+  const nextYears = next ? next.end_season / 10000 - (next.start_season ?? next.end_season) / 10000 + 1 : 0;
+  const termDetail = next
+    ? `Through ${seasonLabel(contract.end_season)}, then a ${nextYears}-year extension${next.cap_hit ? ` at ${money(next.cap_hit)}` : ""}`
+    : `Through ${seasonLabel(contract.end_season)}${contract.expiry_status ? `, then ${contract.expiry_status}` : ""}`;
   const years = Math.floor(contract.end_season / 10000) - Math.floor(currentSeason() / 10000) + 1;
   // The cap hit charged to his team, after any share his previous team retained.
   const charged = contract.cap_hit * (1 - (contract.retained_pct ?? 0) / 100);
@@ -166,12 +194,13 @@ function ContractBoxes({ contract, ceiling, value }: { contract: Contract | unde
   const clause = contract.clause && contract.clause !== "none" ? contract.clause : "None";
   return (
     <div>
-    <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border sm:grid-cols-4">
+    <div className="grid grid-cols-2 rounded-lg border border-border sm:grid-cols-4">
       <Box label="Cap hit" value={money(charged)} detail={capDetail} />
-      <Box label="Term" value={`${years} yr${years === 1 ? "" : "s"}`} detail={`Through ${seasonLabel(contract.end_season)}${contract.expiry_status ? `, then ${contract.expiry_status}` : ""}`} />
+      <Box label="Term" value={`${years} yr${years === 1 ? "" : "s"}`} detail={termDetail} />
       <Box label="Clause" value={clause} detail={contract.no_trade_list_size ? `${contract.no_trade_list_size}-team no-trade list` : undefined} />
       <Box
         label="Surplus value"
+        align="right"
         value={value?.surplus == null ? "—" : `${value.surplus >= 0 ? "+" : "−"}${money(Math.abs(value.surplus))}`}
         detail={value?.market == null ? "needs 40 recent games" : `vs. ${money(value.market)} market estimate`}
         highlight
@@ -196,21 +225,25 @@ function ContractBoxes({ contract, ceiling, value }: { contract: Contract | unde
   );
 }
 
-function Box({ label, value, detail, highlight }: { label: string; value: ReactNode; detail?: ReactNode; highlight?: boolean }) {
+// The highlighted box is the last one (bottom right on phones, right end on wider screens), so its rounded corners
+// match the outer border; the row does not clip its contents, so the "i" explanation can spill past it.
+function Box({ label, value, detail, highlight, align }: { label: string; value: ReactNode; detail?: ReactNode; highlight?: boolean; align?: "left" | "right" }) {
   return (
-    <div className={`border-border p-4 [&:not(:last-child)]:border-r ${highlight ? "bg-positive-soft" : ""}`}>
-      <p className={`text-xs font-semibold uppercase tracking-wide ${highlight ? "text-positive" : "text-muted"}`}>{label}</p>
+    <div className={`border-border p-4 [&:not(:last-child)]:border-r ${highlight ? "rounded-br-lg bg-positive-soft sm:rounded-tr-lg" : ""}`}>
+      <p className={`text-xs font-semibold uppercase tracking-wide ${highlight ? "text-positive" : "text-muted"}`}><Label text={label} align={align} /></p>
       <p className="mt-1 font-mono text-xl">{value}</p>
       {detail && <p className="mt-1 text-xs text-muted">{detail}</p>}
     </div>
   );
 }
 
-function Card({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }) {
+// sign colours the value: blue when positive, orange when negative (the site's good/bad colours).
+function Card({ label, value, detail, sign }: { label: string; value: ReactNode; detail?: ReactNode; sign?: number | null }) {
+  const tone = sign == null || sign === 0 ? "" : sign > 0 ? "text-positive" : "text-negative";
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 font-mono text-2xl">{value}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted"><Label text={label} /></p>
+      <p className={`mt-1 font-mono text-2xl ${tone}`}>{value}</p>
       {detail && <p className="mt-1 text-xs text-muted">{detail}</p>}
     </div>
   );
@@ -238,11 +271,59 @@ function SkaterCards({ seasons, current, xgf }: { seasons: SkaterSeason[]; curre
           detail={`PP ${s.pp_toi_sec != null ? toi(s.pp_toi_sec / s.gp) : "—"} · PK ${s.pk_toi_sec != null ? toi(s.pk_toi_sec / s.gp) : "—"}`}
         />
         <Card label="xGF%" value={xgfNow == null ? "—" : (xgfNow * 100).toFixed(1)} detail={xgfDetail} />
-        <Card label="Game Score" value={signedNum(s.game_score)} detail="per game, goals above average" />
+        <Card label="Game Score" value={signedNum(s.game_score)} detail="per game, goals above average" sign={s.game_score} />
         <Card label="Faceoff %" value={faceoffPct(s.fow, s.fol).replace("%", "")} detail={s.fow + s.fol ? `${s.fow} W · ${s.fol} L` : undefined} />
         <Card label="Plus/minus" value={signed(s.plus_minus)} detail={`Blocks ${s.blocks} · Hits ${s.hits}`} />
       </div>
     </div>
+  );
+}
+
+// His last 10 Game Scores as bars above (blue) or below (orange) a zero line, oldest on the left.
+type ScoredGame = { game_id: number; game_date: string; opponent: string; home: boolean; game_score: number | null };
+
+function RecentGameScores({ games }: { games: ScoredGame[] }) {
+  const scored = games.filter((g) => g.game_score != null).reverse();
+  const largest = Math.max(...scored.map((g) => Math.abs(g.game_score!)), 0.5);
+  const avg = scored.length ? scored.reduce((t, g) => t + g.game_score!, 0) / scored.length : null;
+  const half = 56;
+  return (
+    <Panel title={<Label text="Recent Game Scores" term="Game Score" />} note={scored.length ? `Last ${scored.length} games · goals above average` : undefined}>
+      {scored.length === 0 ? (
+        <Unavailable>No Game Scores yet.</Unavailable>
+      ) : (
+        <>
+          <div className="flex items-stretch gap-1.5" role="img" aria-label={`Last ${scored.length} Game Scores, oldest first: ${scored.map((g) => signedNum(g.game_score)).join(", ")}`}>
+            {scored.map((g) => {
+              const v = g.game_score!;
+              const h = Math.max((Math.abs(v) / largest) * half, 2);
+              const [, mm, dd] = g.game_date.split("-");
+              return (
+                <div key={g.game_id} className="flex min-w-0 flex-1 flex-col items-center" title={`${g.game_date} ${g.home ? "vs" : "@"} ${g.opponent}: ${signedNum(v)}`}>
+                  <span className={`font-mono text-[10px] ${v >= 0 ? "text-positive" : "text-negative"}`}>{v >= 0 ? signedNum(v, 1) : ""}</span>
+                  <div className="flex w-full flex-col justify-end" style={{ height: half }}>
+                    {v >= 0 && <div className="w-full rounded-t-sm bg-positive" style={{ height: h }} />}
+                  </div>
+                  <div className="h-px w-full bg-muted" />
+                  <div className="flex w-full flex-col justify-start" style={{ height: half }}>
+                    {v < 0 && <div className="w-full rounded-b-sm bg-negative" style={{ height: h }} />}
+                  </div>
+                  <span className={`font-mono text-[10px] ${v < 0 ? "text-negative" : "text-transparent"}`}>{signedNum(v, 1)}</span>
+                  <span className="mt-1 text-[10px] leading-tight text-muted">{g.opponent}</span>
+                  <span className="text-[10px] leading-tight text-muted">{Number(mm)}/{Number(dd)}</span>
+                </div>
+              );
+            })}
+          </div>
+          {avg != null && (
+            <p className="mt-3 text-sm">
+              Average <span className={`font-mono font-medium ${avg >= 0 ? "text-positive" : "text-negative"}`}>{signedNum(avg)}</span> per game
+              over these {scored.length}.
+            </p>
+          )}
+        </>
+      )}
+    </Panel>
   );
 }
 
@@ -258,7 +339,9 @@ function GameLog({ games }: { games: SkaterGame[] }) {
               <thead>
                 <tr className="border-b border-border text-xs font-semibold text-muted">
                   {["Game", "G", "A", "SOG", "HIT", "BLK", "TOI", "PP", "PK", "FO", "OZS%", "GV", "TK", "+/-", "GS"].map((h, i) => (
-                    <th key={h} className={`py-2 ${i === 0 ? "pr-3 text-left" : "px-2 text-right"}`}>{h}</th>
+                    <th key={h} className={`py-2 ${i === 0 ? "pr-3 text-left" : "px-2 text-right"}`}>
+                      <Label text={h} term={["TOI", "PP", "PK"].includes(h) ? `${h} (game)` : undefined} align={i > 10 ? "right" : "left"} />
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -344,7 +427,7 @@ function AdvancedPanel({ advanced, position }: { advanced: SkaterAdvanced | unde
               return (
                 <div key={m.key} className="rounded-lg border border-border p-3">
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-xs font-semibold">{m.key}</span>
+                    <span className="text-xs font-semibold"><Label text={m.key} /></span>
                     <span className="font-mono text-lg">{formatMetric(m.key, m.value)}</span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border-soft" aria-hidden>
@@ -386,7 +469,7 @@ function GameScorePanel({ breakdown }: { breakdown: GameScoreBreakdown | undefin
       <dl className="space-y-2">
         {breakdown.parts.map((p) => (
           <div key={p.key} className="grid grid-cols-[10rem_4rem_1fr] items-center gap-3">
-            <dt className="text-sm text-muted">{p.key}</dt>
+            <dt className="text-sm text-muted"><Label text={p.key} term={p.key === "Playmaking" ? "Playmaking (Game Score)" : undefined} /></dt>
             <dd className="text-right font-mono text-sm">{signedNum(p.value, 1)}</dd>
             <dd className="flex h-2 items-center" aria-hidden>
               <div
@@ -451,7 +534,7 @@ function SentimentPanel() {
       <div className="grid grid-cols-3 gap-2">
         {["Fans", "Beat writers", "Media"].map((a) => (
           <div key={a} className="rounded-lg border border-border p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted">{a}</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted"><Label text={a} term={a === "Beat writers" ? "Beat" : a === "Media" ? "Media" : undefined} /></p>
             <p className="mt-1 font-mono text-2xl">—</p>
           </div>
         ))}
@@ -487,10 +570,120 @@ function SkatingPanel({ edge }: { edge: Edge | undefined }) {
 function Stat({ label, value, detail }: { label: string; value: ReactNode; detail?: string }) {
   return (
     <div>
-      <dt className="text-xs text-muted">{label}</dt>
+      <dt className="text-xs text-muted"><Label text={label} /></dt>
       <dd className="font-mono text-lg">{value}</dd>
       {detail && <dd className="text-xs text-muted">{detail}</dd>}
     </div>
+  );
+}
+
+function svFmt(v: number | null | undefined): string {
+  return v == null ? "—" : v.toFixed(3).replace(/^0/, "");
+}
+
+function GoalieGameLog({ games }: { games: GoalieGame[] }) {
+  return (
+    <Panel title="Game log" note="Last 5 games · NHL API">
+      {games.length === 0 ? (
+        <Unavailable>No NHL games in our data yet.</Unavailable>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-max border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs font-semibold text-muted">
+                  {["Game", "Dec", "SA", "SV", "GA", "SV%", "TOI", "xGA", "GSAx", "HD saves", "GS"].map((h, i) => (
+                    <th key={h} className={`py-2 ${i === 0 ? "pr-3 text-left" : "px-2 text-right"}`}>
+                      <Label text={h} term={h === "GSAx" ? "GSAx (game)" : h === "SV%" ? "SV% (game)" : undefined} align={i > 6 ? "right" : "left"} />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="font-mono">
+                {games.map((g) => (
+                  <tr key={g.game_id} className="border-b border-border-soft last:border-0">
+                    <td className="py-2 pr-3 font-sans">
+                      <span className="font-medium">{shortDate(g.game_date)}</span>
+                      <span className="block text-xs text-muted">{g.home ? "vs" : "@"} {g.opponent} · {g.result}</span>
+                    </td>
+                    <td className="px-2 text-right">{g.decision === "O" ? "OTL" : g.decision ?? (g.started ? "ND" : "Relief")}</td>
+                    <td className="px-2 text-right">{g.shots_against}</td>
+                    <td className="px-2 text-right">{g.saves}</td>
+                    <td className="px-2 text-right">{g.ga}</td>
+                    <td className="px-2 text-right">{svFmt(g.shots_against ? g.saves / g.shots_against : null)}</td>
+                    <td className="px-2 text-right">{toi(g.toi_sec)}</td>
+                    <td className="px-2 text-right">{g.xga == null ? "—" : num(g.xga, 2)}</td>
+                    <td className={`px-2 text-right ${g.gsax == null ? "" : g.gsax >= 0 ? "text-positive" : "text-negative"}`}>{signedNum(g.gsax)}</td>
+                    <td className="px-2 text-right">{g.hd_shots == null ? "—" : `${g.hd_shots - (g.hd_goals ?? 0)}/${g.hd_shots}`}</td>
+                    <td className={`px-2 text-right ${g.game_score == null ? "" : g.game_score >= 0 ? "text-positive" : "text-negative"}`}>
+                      {signedNum(g.game_score)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-muted">
+            Dec = decision (W, L, OTL; ND = started, no decision). HD saves = high-danger shots on goal stopped. GS = our
+            Game Score.
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+// Workload context, not quality: its bar is grey.
+const GOALIE_CONTEXT = new Set(["xGA/60"]);
+
+function formatGoalieMetric(key: string, value: number | null): string {
+  if (value == null) return "—";
+  if (key.includes("SV%")) return svFmt(value);
+  if (key.endsWith("%")) return pct(value);
+  if (key === "GSAx/60") return signedNum(value);
+  if (key.includes("GSAx")) return signedNum(value, 1);
+  return num(value, 2);
+}
+
+function GoalieAdvancedPanel({ advanced }: { advanced: GoalieAdvanced | undefined }) {
+  return (
+    <Panel
+      title="Advanced metrics"
+      note={advanced
+        ? `${seasonLabel(advanced.season_id)} · ${advanced.gp} GP · ${Math.round(advanced.toi_sec / 60).toLocaleString("en-US")} min · percentile vs. NHL goalies`
+        : undefined}
+    >
+      {!advanced ? (
+        <Unavailable>No goalie data yet.</Unavailable>
+      ) : (
+        <>
+          {!advanced.ranked && <p className="mb-3 text-sm text-muted">Percentiles appear after 600 minutes in a season.</p>}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+            {advanced.metrics.map((m) => {
+              const rank = m.pctile == null ? null : Math.round(m.pctile * 100);
+              const fill = GOALIE_CONTEXT.has(m.key) ? "bg-muted" : rank != null && rank >= 50 ? "bg-positive" : "bg-negative";
+              return (
+                <div key={m.key} className="rounded-lg border border-border p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-xs font-semibold"><Label text={m.key} /></span>
+                    <span className="font-mono text-lg">{formatGoalieMetric(m.key, m.value)}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border-soft" aria-hidden>
+                    {rank != null && <div className={`h-full ${fill}`} style={{ width: `${Math.max(rank, 2)}%` }} />}
+                  </div>
+                  <p className="mt-1 text-xs text-muted">{rank == null ? "no percentile yet" : `${ordinal(rank)} percentile`}</p>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-4 text-xs text-muted">
+            Expected goals come from our own model and rate every unblocked shot he faced by its chance of going in.
+            High-danger shots are those worth 0.15 expected goals or more. Percentiles compare him with goalies who
+            played 600 minutes that season. xGA/60 shows how hard his workload was, so its bar is grey.
+          </p>
+        </>
+      )}
+    </Panel>
   );
 }
 
@@ -506,8 +699,8 @@ function GoalieCards({ seasons, current }: { seasons: GoalieSeason[]; current: n
         <Card label="SV%" value={svPct(s.saves, s.shots_against)} />
         <Card label="GAA" value={s.toi_sec ? num((s.ga * 3600) / s.toi_sec, 2) : "—"} />
         <Card label="Shots against" value={s.shots_against} />
-        <Card label="GSAx" value={s.gsax == null ? "—" : signed(Math.round(s.gsax * 10) / 10)} detail="goals saved above expected" />
-        <Card label="Game Score" value={signedNum(s.game_score)} detail="per game" />
+        <Card label="GSAx" value={s.gsax == null ? "—" : signed(Math.round(s.gsax * 10) / 10)} detail="goals saved above expected" sign={s.gsax} />
+        <Card label="Game Score" value={signedNum(s.game_score)} detail="per game" sign={s.game_score} />
       </div>
     </div>
   );
@@ -525,7 +718,7 @@ function GoalieSeasons({ seasons }: { seasons: GoalieSeason[] }) {
               <Th left>Season</Th>
               <Th>Team</Th>
               <Th>GP</Th>
-              <Th>GS</Th>
+              <Th term="GS (goalie)">GS</Th>
               <Th>W-L-OTL</Th>
               <Th>SV%</Th>
               <Th>GAA</Th>
@@ -555,6 +748,72 @@ function GoalieSeasons({ seasons }: { seasons: GoalieSeason[] }) {
 }
 
 const GROUP_LABEL: Record<string, string> = { D: "defensemen", G: "goalies" };
+
+// One row per season still to be played under contract: the current deal and any extension.
+function FutureCapPanel({ contracts, season }: { contracts: FutureContract[]; season: number }) {
+  const rows: { season: number; c: FutureContract; first: boolean; last: boolean }[] = [];
+  for (const c of contracts) {
+    const startYear = Math.floor(Math.max(c.start_season ?? season, season) / 10000);
+    const endYear = Math.floor(c.end_season / 10000);
+    for (let y = startYear; y <= endYear; y++) {
+      rows.push({ season: y * 10000 + y + 1, c, first: y === Math.floor((c.start_season ?? 0) / 10000), last: y === endYear });
+    }
+  }
+  const total = contracts.reduce((t, c) => {
+    const years = Math.floor(c.end_season / 10000) - Math.floor(Math.max(c.start_season ?? season, season) / 10000) + 1;
+    return c.cap_hit == null || t == null ? null : t + c.cap_hit * years;
+  }, 0 as number | null);
+  return (
+    <Panel title="Contract by season" note={rows.length ? `${rows.length} season${rows.length === 1 ? "" : "s"} left` : undefined}>
+      {rows.length === 0 ? (
+        <Unavailable>No contract on file.</Unavailable>
+      ) : (
+        <>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs font-semibold text-muted">
+                <th className="py-2 text-left">Season</th>
+                <th className="px-2 text-left">Team</th>
+                <th className="px-2 text-right">Cap hit</th>
+                <th className="pl-2 text-right"><Label text="% of cap" term="Cap %" align="right" /></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ season: s, c, first, last }) => {
+                const ceiling = c.ceilings?.[String(s)];
+                const charged = c.cap_hit == null ? null : c.cap_hit * (1 - c.retained_pct / 100);
+                return (
+                  <tr key={s} className={`border-b border-border-soft last:border-0 ${first && s !== rows[0].season ? "border-t-2 border-t-border" : ""}`}>
+                    <td className="py-2 font-mono">
+                      {seasonLabel(s)}
+                      {first && s !== rows[0].season && <span className="ml-2 rounded bg-positive-soft px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase text-positive">New deal</span>}
+                    </td>
+                    <td className="px-2">{c.team}</td>
+                    <td className="px-2 text-right font-mono">{charged == null ? "unknown" : money(charged)}</td>
+                    <td className="pl-2 text-right font-mono text-muted">
+                      {charged != null && ceiling ? `${((charged / ceiling) * 100).toFixed(1)}%` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {(() => {
+            const final = contracts[contracts.length - 1];
+            return (
+              <p className="mt-3 text-xs text-muted">
+                {final.expiry_status ? `${final.expiry_status} after ${seasonLabel(final.end_season)}. ` : ""}
+                {final.clause && final.clause !== "none" ? `${final.clause}${final.no_trade_list_size ? ` (${final.no_trade_list_size}-team list)` : ""}. ` : ""}
+                {total != null ? `${money(total)} in cap hits left. ` : ""}
+                % of cap uses each season&apos;s ceiling where the league has set one ($104M this season, $113.5M in 2027-28).
+              </p>
+            );
+          })()}
+        </>
+      )}
+    </Panel>
+  );
+}
 
 function AgeCurvePanel({ curve, age, contract, position }: { curve: AgePoint[]; age: number | null; contract: Contract | undefined; position: string | null }) {
   if (curve.length === 0 || age == null) {

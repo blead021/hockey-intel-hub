@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Panel, Unavailable } from "@/components/ui";
+import { Label, Panel, Unavailable } from "@/components/ui";
 import { season as seasonLabel } from "@/lib/format";
 import type { PlayStyle } from "@/lib/queries";
 
@@ -64,7 +64,7 @@ export function PlayStyleSection({ style }: { style: PlayStyle | undefined }) {
               return (
                 <div key={t.key} className="grid grid-cols-[8.5rem_1fr_2rem] items-center gap-3">
                   <dt className="text-sm font-semibold">
-                    {t.key}
+                    <Label text={t.key} />
                     {t.estimate && <span className="ml-1 text-xs font-normal text-muted">(est.)</span>}
                   </dt>
                   <dd className="h-2 overflow-hidden rounded-full bg-border-soft" aria-hidden>

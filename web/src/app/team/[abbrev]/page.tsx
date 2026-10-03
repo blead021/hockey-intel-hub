@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { TeamSelect } from "@/components/team-select";
-import { SeasonPicker, StatCard, Unavailable } from "@/components/ui";
+import { Label, SeasonPicker, StatCard, Unavailable } from "@/components/ui";
 import { withDb } from "@/lib/db";
 import { faceoffPct, money, num, season as seasonLabel, shortDate, signed, svPct, toi } from "@/lib/format";
 import {
@@ -14,6 +15,8 @@ import {
   getContractCount,
   getEnabledSources,
   getExpiring,
+  getTeamFutureCap,
+  type FutureCapRow,
   getLoadedSeasons,
   getPlayerSentiment,
   getReserveList,
@@ -69,7 +72,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
     if (!team) return null;
     const season = requested ?? current;
     const isCurrent = season === current;
-    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace] = await Promise.all([
+    const [teams, seasons, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, future] = await Promise.all([
       getTeams(sql),
       getLoadedSeasons(sql),
       getTeamSummary(sql, team.id, season),
@@ -86,12 +89,13 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       getCapUpdatedAt(sql),
       isCurrent ? getUndervalued(sql, season, team.id, 4) : Promise.resolve([] as Undervalued[]),
       isCurrent ? getTeamCapSpace(sql, team.id) : Promise.resolve(undefined),
+      isCurrent ? getTeamFutureCap(sql, team.id, season) : Promise.resolve(undefined),
     ]);
     const sentiment = await getPlayerSentiment(sql, [...skaters, ...goalies].map((p) => p.id));
-    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, sentiment };
+    return { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, future, sentiment };
   });
   if (!data) notFound();
-  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, sentiment } = data;
+  const { team, teams, seasons, season, isCurrent, summary, skaters, goalies, sources, ceiling, expiring, chatter, retained, reserve, contractCount, charges, capAsOf, undervalued, capSpace, future, sentiment } = data;
 
   const showContracts = sources.has("contracts_csv");
   const forwards = skaters.filter((s) => s.position !== "D");
@@ -161,13 +165,13 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-10 bg-surface py-3 pr-3 text-left">Player</th>
               {["Pos", "Age", "GP", "G", "A", "P", "TOI", "FO%", "xGF%", "WAR"].map((h) => (
-                <th key={h} className="px-2 py-3 text-right">{h}</th>
+                <th key={h} className="px-2 py-3 text-right"><Label text={h} align={["Cap hit", "Yrs", "Expiry", "Clause", "Type"].includes(h) ? "right" : "left"} /></th>
               ))}
               {showContracts && ["Cap hit", "Yrs", "Expiry", "Clause"].map((h) => (
-                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}>{h}</th>
+                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}><Label text={h} align={["Cap hit", "Yrs", "Expiry", "Clause", "Type"].includes(h) ? "right" : "left"} /></th>
               ))}
-              <th className="px-2 py-3 text-right">Fans</th>
-              <th className="py-3 pl-2 text-right">Chatter</th>
+              <th className="px-2 py-3 text-right"><Label text="Fans" align="right" /></th>
+              <th className="py-3 pl-2 text-right"><Label text="Chatter" align="right" /></th>
             </tr>
           </thead>
           <tbody>
@@ -188,12 +192,12 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
             <thead>
               <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
                 <th className="sticky left-0 z-10 bg-surface py-3 pr-3 text-left">Player</th>
-                {["Age", "GP", "SV%", "GAA", "GSAx", "WAR"].map((h) => <th key={h} className="px-2 py-3 text-right">{h}</th>)}
+                {["Age", "GP", "SV%", "GAA", "GSAx", "WAR"].map((h) => <th key={h} className="px-2 py-3 text-right"><Label text={h} align={["Cap hit", "Yrs", "Expiry", "Clause", "Type"].includes(h) ? "right" : "left"} /></th>)}
                 {showContracts && ["Cap hit", "Yrs", "Expiry", "Clause"].map((h) => (
-                  <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}>{h}</th>
+                  <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Clause" ? "text-left" : "text-right"}`}><Label text={h} align={["Cap hit", "Yrs", "Expiry", "Clause", "Type"].includes(h) ? "right" : "left"} /></th>
                 ))}
-                <th className="px-2 py-3 text-right">Fans</th>
-                <th className="py-3 pl-2 text-right">Chatter</th>
+                <th className="px-2 py-3 text-right"><Label text="Fans" align="right" /></th>
+                <th className="py-3 pl-2 text-right"><Label text="Chatter" align="right" /></th>
               </tr>
             </thead>
             <tbody>
@@ -208,6 +212,8 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
       </div>
 
       {showContracts && isCurrent && <ReserveList rows={reserve} season={season} />}
+
+      {showContracts && future && <FutureCapGrid future={future} thisSeasonTotal={capCommitted} />}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         {showContracts && <CapByPosition forwards={capOf(forwards)} defense={capOf(defense)} goalies={capOf(goalies)} retained={retained} offRoster={offRoster} />}
@@ -447,7 +453,7 @@ function ReserveList({ rows, season }: { rows: ReservePlayer[]; season: number }
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
               <th className="py-3 pr-3 text-left">Player</th>
               {["Pos", "Age", "Cap hit", "Yrs", "Expiry", "Type"].map((h) => (
-                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Type" ? "text-left" : "text-right"}`}>{h}</th>
+                <th key={h} className={`px-2 py-3 ${h === "Expiry" || h === "Type" ? "text-left" : "text-right"}`}><Label text={h} align={["Cap hit", "Yrs", "Expiry", "Clause", "Type"].includes(h) ? "right" : "left"} /></th>
               ))}
             </tr>
           </thead>
@@ -500,6 +506,106 @@ function UndervaluedHere({ rows }: { rows: Undervalued[] }) {
       <p className="mt-3 text-xs text-muted">
         Fans = fan sentiment 0-100. Perf. = performance percentile at his position among players fans discuss (5v5
         expected goals share, projected WAR, Game Score). Reasons are written by Claude from the numbers only.
+      </p>
+    </section>
+  );
+}
+
+// Signed cap hits for this season and the next four (Brian, 2026-10-03). This season's total is the full cap
+// charge (buried players, dead cap, and retained salary as charged today); later seasons add up the signed contracts,
+// so they will rise as the team signs players.
+function FutureCapGrid({ future, thisSeasonTotal }: {
+  future: { seasons: number[]; rows: FutureCapRow[]; ceilings: Map<number, number> };
+  thisSeasonTotal: number;
+}) {
+  const { seasons, rows, ceilings } = future;
+  const groups: { title: string; rows: FutureCapRow[] }[] = [
+    { title: "Forwards", rows: rows.filter((r) => !r.retained && !["D", "G"].includes(r.position)) },
+    { title: "Defense", rows: rows.filter((r) => !r.retained && r.position === "D") },
+    { title: "Goalies", rows: rows.filter((r) => !r.retained && r.position === "G") },
+    { title: "Retained salary", rows: rows.filter((r) => r.retained) },
+  ].filter((g) => g.rows.length);
+  const sum = (s: number) => rows.reduce((t, r) => t + (r.by_season[String(s)] ?? 0), 0);
+  const count = (s: number) => rows.filter((r) => !r.retained && r.by_season[String(s)] !== undefined).length;
+  const committed = (s: number, i: number) => (i === 0 ? thisSeasonTotal : sum(s));
+  const cell = "px-2 py-1.5 text-right font-mono";
+  return (
+    <section className="mt-6 overflow-x-auto rounded-lg border border-border bg-surface px-4 pb-4">
+      <h2 className="pt-4 font-heading text-2xl font-semibold uppercase tracking-tight">Cap by season</h2>
+      <p className="mt-1 text-xs text-muted">
+        Signed cap hits by season. A badge marks the final season of each deal: UFA or RFA after it. Later seasons count only contracts
+        signed so far.
+      </p>
+      <table className="mt-3 w-full min-w-max border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs font-semibold uppercase tracking-wide text-muted">
+            <th className="sticky left-0 z-10 bg-surface py-2 pr-3 text-left">Player</th>
+            {seasons.map((s) => <th key={s} className="px-2 py-2 text-right">{seasonLabel(s)}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <Fragment key={g.title}>
+              <tr>
+                <td colSpan={seasons.length + 1} className="sticky left-0 bg-surface pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-muted">{g.title}</td>
+              </tr>
+              {g.rows.map((r) => (
+                <tr key={`${r.player_id ?? r.name}-${r.retained}`} className="border-b border-border-soft">
+                  <td className="sticky left-0 z-10 bg-surface py-1.5 pr-3">
+                    {r.player_id && !r.retained ? <Link href={`/player/${r.player_id}`} className="hover:underline">{r.name}</Link> : r.name}
+                    {r.position && !r.retained && <span className="ml-1 text-xs text-muted">{r.position}</span>}
+                    {r.clause && r.clause !== "none" && <span className="ml-1 text-[10px] font-semibold text-muted">{r.clause}</span>}
+                  </td>
+                  {seasons.map((s) => {
+                    const v = r.by_season[String(s)];
+                    const final = !r.retained && s === r.end_season;
+                    return (
+                      <td key={s} className={`${cell} ${v === undefined ? "text-border" : ""}`}>
+                        {v === undefined ? "·" : v === null ? "unknown" : money(v)}
+                        {final && r.expiry_status && (
+                          <span className={`ml-1 rounded px-1 font-sans text-[10px] font-semibold ${r.expiry_status === "UFA" ? "bg-negative-soft text-negative" : "bg-border-soft text-muted"}`}>
+                            {r.expiry_status}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+        <tfoot className="text-sm">
+          <tr className="border-t-2 border-border font-semibold">
+            <td className="sticky left-0 z-10 bg-surface py-2 pr-3">Committed</td>
+            {seasons.map((s, i) => <td key={s} className={cell}>{money(committed(s, i))}</td>)}
+          </tr>
+          <tr>
+            <td className="sticky left-0 z-10 bg-surface py-1.5 pr-3 text-muted">Players signed</td>
+            {seasons.map((s) => <td key={s} className={`${cell} text-muted`}>{count(s)}</td>)}
+          </tr>
+          <tr>
+            <td className="sticky left-0 z-10 bg-surface py-1.5 pr-3 text-muted">Cap ceiling</td>
+            {seasons.map((s) => <td key={s} className={`${cell} text-muted`}>{ceilings.has(s) ? money(ceilings.get(s)!) : "not set"}</td>)}
+          </tr>
+          <tr className="font-semibold">
+            <td className="sticky left-0 z-10 bg-surface py-1.5 pr-3">Cap space</td>
+            {seasons.map((s, i) => {
+              const c = ceilings.get(s);
+              const space = c == null ? null : c - committed(s, i);
+              return (
+                <td key={s} className={`${cell} ${space == null ? "text-muted" : space >= 0 ? "text-positive" : "text-negative"}`}>
+                  {space == null ? "—" : money(space)}
+                </td>
+              );
+            })}
+          </tr>
+        </tfoot>
+      </table>
+      <p className="mt-3 text-xs text-muted">
+        This season&apos;s committed total is the full cap charge used above (players in the minors count only above the buried allowance,
+        plus dead cap); before LTIR relief. The 2027-28 ceiling of $113.5M is the league&apos;s announced figure; later ceilings are not set
+        yet. Buyouts and dead cap in future seasons are not included.
       </p>
     </section>
   );
