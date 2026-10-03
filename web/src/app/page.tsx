@@ -10,13 +10,26 @@ const LINKS = [
 
 export default function Home() {
   return (
-    <main className="mx-auto max-w-5xl px-4 py-16">
-      <p className="text-sm font-semibold uppercase tracking-widest text-muted">Front office tools for hockey fans</p>
-      <h1 className="font-heading text-5xl font-bold uppercase tracking-tight sm:text-6xl">{SITE_NAME}</h1>
-      <p className="mt-4 max-w-2xl text-lg text-muted">
-        Player stats, advanced analytics, expected goals, contracts, and what fans and beat writers are saying, all in
-        one place. Updated after every night of games.
-      </p>
+    <main className="mx-auto max-w-5xl px-4 py-12">
+      <div className="flex flex-col-reverse items-center gap-8 md:flex-row md:justify-between">
+        <div className="text-center md:text-left">
+          <p className="text-sm font-semibold uppercase tracking-widest text-muted">Front office tools for hockey fans</p>
+          <h1 className="font-heading text-6xl font-bold uppercase tracking-tight sm:text-7xl">{SITE_NAME}</h1>
+          <p className="mt-4 max-w-xl text-lg text-muted">
+            Player stats, advanced analytics, expected goals, contracts, and what fans and beat writers are saying, all
+            in one place. Updated after every night of games.
+          </p>
+        </div>
+        {/* The hockey detective. Plain img: Cloudflare image resizing is off to avoid its fees. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-large.webp"
+          alt="PuckSleuth's hockey detective studying a puck through a magnifying glass"
+          width={360}
+          height={360}
+          className="h-64 w-64 shrink-0 rounded-2xl border border-border shadow-sm sm:h-80 sm:w-80 md:h-[22rem] md:w-[22rem]"
+        />
+      </div>
       <div className="mt-10 grid gap-4 sm:grid-cols-3">
         {LINKS.map((l) => (
           <Link key={l.href} href={l.href} className="rounded-lg border border-border bg-surface p-5 hover:border-ink">

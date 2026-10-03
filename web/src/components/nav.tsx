@@ -22,7 +22,7 @@ export function SiteNav() {
         <Link href="/" className="flex shrink-0 items-center gap-3 font-heading text-2xl font-bold uppercase tracking-wide">
           {/* The hockey detective. Plain img: Cloudflare image resizing is off to avoid its fees. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" width={40} height={40} className="h-10 w-10 rounded-md bg-[#ebe8e1] object-cover" />
+          <img src="/logo.png" alt="" width={48} height={48} className="h-12 w-12 rounded-md bg-[#ebe8e1] object-cover" />
           {SITE_NAME}
         </Link>
         <nav className="flex shrink-0 gap-1 text-sm">
