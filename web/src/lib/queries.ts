@@ -891,10 +891,12 @@ export async function getAgingCurve(sql: Sql, grp: "F" | "D" | "G"): Promise<Age
 export type TradeTarget = {
   player_id: number; name: string; team: string; position: string; age: number | null;
   cap_hit: number; years: number; end_season: number; expiry_status: string | null; clause: string | null;
-  war_proj: number | null; surplus: number | null; perf_pctile: number | null; fans_pctile: number | null; perf_vs_fans: number | null;
+  war_proj: number | null; surplus: number | null; perf_pctile: number | null; 
   fans: number | null; fans_trend: number | null; beat: number | null; beat_trend: number | null;
   chatter: number; chatter_prior: number;
   need: Record<string, number | null>;
+  buy_low: boolean; underlying_pct: number | null; results_pct: number | null; xgf_pct: number | null; gf_pct: number | null;
+  team_status: string | null; power_rank: number | null; core: boolean;
 };
 
 export type TargetFilters = {
@@ -922,16 +924,6 @@ export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters
              max(s.score_0_100::float8) filter (where s.audience = 'fan') as fans,
              max(s.score_0_100::float8) filter (where s.audience = 'beat_writer') as beat
       from sentiment_daily s, latest where s.date = latest.d group by s.player_id),
-    -- Buy-low compares ranks within the same group (players with a fan score, same position group), because fan
-    -- scores cluster near the middle and the players fans talk about skew toward good ones.
-    fan_rank as (
-      select a.player_id,
-             percent_rank() over (partition by g.grp order by a.fans) * 100 as fans_pctile,
-             percent_rank() over (partition by g.grp order by v.war_proj) * 100 as perf_vs_fans
-      from aud a join val v on v.player_id = a.player_id
-      join (select id, case when position = 'D' then 'D' when position = 'G' then 'G' else 'F' end as grp from players) g
-        on g.id = a.player_id
-      where a.fans is not null and v.war_proj is not null),
     old as (
       select s.player_id,
              max(s.score_0_100::float8) filter (where s.audience = 'fan') as fans,
@@ -946,14 +938,22 @@ export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters
            date_part('year', age(p.birth_date))::int as age,
            c.cap_hit::float8 as cap_hit, (c.end_season / 10000 - ${season} / 10000 + 1)::int as years,
            c.end_season, c.expiry_status, c.clause,
-           v.war_proj, v.surplus, pct.perf_pctile::float8 as perf_pctile, fr.fans_pctile::float8 as fans_pctile, fr.perf_vs_fans::float8 as perf_vs_fans,
+           v.war_proj, v.surplus, pct.perf_pctile::float8 as perf_pctile, 
            a.fans, a.fans - o.fans as fans_trend, a.beat, a.beat - o.beat as beat_trend,
            coalesce(ch.chatter, 0) as chatter, coalesce(ch.prior, 0) as chatter_prior,
            json_build_object('goal_scoring', n.goal_scoring, 'playmaking', n.playmaking, 'physicality', n.physicality,
              'defense_5v5', n.defense_5v5, 'power_play', n.power_play, 'penalty_kill', n.penalty_kill,
-             'goaltending', n.goaltending) as need
+             'goaltending', n.goaltending) as need,
+           coalesce(bl.buy_low, false) as buy_low, bl.underlying_pct::float8 as underlying_pct,
+           bl.results_pct::float8 as results_pct, bl.xgf_pct::float8 as xgf_pct, bl.gf_pct::float8 as gf_pct,
+           tp.status as team_status, tp.power_rank,
+           -- A team's six best players by projected WAR are its core; contenders do not move them.
+           coalesce((select count(*) from players q join val qv on qv.player_id = q.id
+                     where q.current_team_id = p.current_team_id and qv.war_proj > v.war_proj), 99) < 6 as core
     from players p
     left join player_need_pctiles n on n.player_id = p.id
+    left join player_buy_low bl on bl.player_id = p.id
+    left join team_power tp on tp.team_id = p.current_team_id
     join teams t on t.id = p.current_team_id
     join lateral (
       select cap_hit, end_season, expiry_status, clause from contracts
@@ -963,7 +963,6 @@ export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters
     left join val v on v.player_id = p.id
     left join pct on pct.player_id = p.id
     left join aud a on a.player_id = p.id
-    left join fan_rank fr on fr.player_id = p.id
     left join old o on o.player_id = p.id
     left join chat ch on ch.player_id = p.id
     where (${f.exceptTeamId ?? null}::int is null or p.current_team_id <> ${f.exceptTeamId ?? null})
