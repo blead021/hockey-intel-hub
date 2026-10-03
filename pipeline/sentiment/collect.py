@@ -66,7 +66,17 @@ def run_source(conn, http, source: str, counts) -> None:
         return
     collector_cls = COLLECTORS[source]
     feeds = load_feeds(conn, collector_cls.kinds)
-    collector = collector_cls(http, feeds)
+    if source == "youtube":
+        # Units used by earlier runs since midnight Pacific, when YouTube's daily quota resets.
+        used = conn.execute(
+            """select coalesce(sum((counts ->> 'youtube_units')::int), 0) from job_runs
+               where started_at >= (date_trunc('day', now() at time zone 'America/Los_Angeles') at time zone 'America/Los_Angeles')"""
+        ).fetchone()[0]
+        collector = collector_cls(http, feeds, used_today=used)
+    else:
+        collector = collector_cls(http, feeds)
+    if hasattr(collector, "order"):
+        feeds = collector.order(feeds)
     attempted = failed = 0
 
     for feed in feeds:
@@ -96,6 +106,8 @@ def run_source(conn, http, source: str, counts) -> None:
             with conn.transaction():
                 record_state(conn, feed.id, error=message + "\n" + traceback.format_exc(limit=5))
 
+    if hasattr(collector, "units"):
+        counts[f"{source}_units"] += collector.units
     if attempted and failed / attempted > 0.5:
         raise SourceFailed(f"{source}: {failed} of {attempted} feeds failed; see collector_state.last_error")
 

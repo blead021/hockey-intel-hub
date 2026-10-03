@@ -16,17 +16,31 @@ API = "https://www.googleapis.com/youtube/v3"
 VIDEO_WINDOW = timedelta(days=7)
 MAX_VIDEOS = 10
 PAGES_PER_VIDEO = 3
+DAILY_BUDGET = 9_000   # units; YouTube's free quota is 10,000 a day and resets at midnight Pacific time
 
 
 class Collector:
     source = "youtube"
     kinds = ("youtube_channel",)
 
-    def __init__(self, http, feeds: list[Feed]):
+    def __init__(self, http, feeds: list[Feed], used_today: int = 0):
         self.http = http
+        self.units = 0              # units this run
+        self.used_today = used_today  # units earlier runs used since midnight Pacific
+
+    def order(self, feeds: list[Feed]) -> list[Feed]:
+        """Start at a different channel each run (by hour), so no channel is always last when the budget runs out."""
+        if not feeds:
+            return feeds
+        start = datetime.now(UTC).hour * 7 % len(feeds)
+        return feeds[start:] + feeds[:start]
 
     def unavailable(self, feed: Feed) -> str | None:
-        return None if os.environ.get("YOUTUBE_API_KEY") else "YOUTUBE_API_KEY is not set"
+        if not os.environ.get("YOUTUBE_API_KEY"):
+            return "YOUTUBE_API_KEY is not set"
+        if self.used_today + self.units >= DAILY_BUDGET:
+            return "daily YouTube budget reached; the rest wait for the next run"
+        return None
 
     def fetch(self, feed: Feed, cursor: str | None) -> FetchResult:
         state = json.loads(cursor) if cursor else {}
@@ -101,6 +115,7 @@ class Collector:
         return pages
 
     def _get(self, resource: str, **params) -> dict:
+        self.units += 1  # every call this collector makes costs 1 unit
         return get_json(self.http, f"{API}/{resource}", params={**params, "key": os.environ["YOUTUBE_API_KEY"]})
 
 
