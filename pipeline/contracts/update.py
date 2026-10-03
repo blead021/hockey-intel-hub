@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dry-run", action="store_true", help="print what Claude extracts; change no contracts")
     parser.add_argument("--backfill", action="store_true",
                         help="process released backfill headlines: only add missing contracts, never change one")
+    parser.add_argument("--batch", type=int, help="headlines per Claude request (smaller if replies get cut off)")
     parser.add_argument("--max", type=int, default=MAX_ITEMS_PER_RUN, help="most headlines to process this run")
     args = parser.parse_args(argv)
 
@@ -72,8 +73,9 @@ def main(argv: list[str] | None = None) -> None:
         outcomes: Counter = Counter()
         errors: list[str] = []
 
-        for start in range(0, len(items), BATCH_SIZE):
-            batch = items[start:start + BATCH_SIZE]
+        size = args.batch or BATCH_SIZE
+        for start in range(0, len(items), size):
+            batch = items[start:start + size]
             ids = [i["id"] for i in batch]
             try:
                 result = extract(claude, batch, team_codes)
