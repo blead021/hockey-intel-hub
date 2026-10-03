@@ -863,3 +863,27 @@ export async function getCapUpdatedAt(sql: Sql): Promise<string | null> {
     from job_runs where job = 'contract_news' and status = 'success'`;
   return row?.d ?? null;
 }
+
+export type PlayerValue = {
+  war_proj: number | null; market: number | null; surplus: number | null; war_last: number | null;
+  comps: { id: number; name: string }[];
+};
+
+// Latest projection, market value, surplus, and comparables (pipeline/models/value.py).
+export async function getPlayerValue(sql: Sql, playerId: number): Promise<PlayerValue | undefined> {
+  const [row] = await sql<PlayerValue[]>`
+    select v.war_proj::float8 as war_proj, v.market_aav_est::float8 as market, v.surplus::float8 as surplus,
+           (select w.war::float8 from player_war w where w.player_id = v.player_id
+             order by (w.gp >= 20) desc, w.season_id desc limit 1) as war_last,
+           coalesce((select json_agg(json_build_object('id', p.id, 'name', p.first_name || ' ' || p.last_name))
+                     from unnest(v.comps[1:5]) as c(id) join players p on p.id = c.id), '[]') as comps
+    from player_value v where v.player_id = ${playerId} order by v.as_of desc limit 1`;
+  return row;
+}
+
+export type AgePoint = { age: number; index: number };
+
+export async function getAgingCurve(sql: Sql, grp: "F" | "D" | "G"): Promise<AgePoint[]> {
+  return sql<AgePoint[]>`
+    select age, index::float8 as index from aging_curves where grp = ${grp} and age between 19 and 38 order by age`;
+}

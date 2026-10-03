@@ -16,6 +16,8 @@ import {
   getLatestOniceSeason,
   getPlayer,
   getPlayStyle,
+  getPlayerValue,
+  getAgingCurve,
   getSkaterAdvanced,
   getSkaterLastGames,
   getSkaterSeasons,
@@ -25,6 +27,8 @@ import {
   type GameScoreBreakdown,
   type GoalieSeason,
   type Player,
+  type PlayerValue,
+  type AgePoint,
   type SkaterAdvanced,
   type SkaterGame,
   type SkaterSeason,
@@ -57,7 +61,8 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
     const breakdownSeason = isGoalie
       ? (await sql<{ s: number | null }[]>`select max(g.season_id) as s from player_game_score gs join games g on g.id = gs.game_id where gs.player_id = ${id} and g.game_type = 2`)[0]?.s
       : oniceSeason;
-    const [skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf] =
+    const grp: "F" | "D" | "G" = isGoalie ? "G" : player.position === "D" ? "D" : "F";
+    const [skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve] =
       await Promise.all([
         isGoalie ? Promise.resolve([]) : getSkaterSeasons(sql, id),
         isGoalie ? getGoalieSeasons(sql, id) : Promise.resolve([]),
@@ -70,15 +75,17 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
         breakdownSeason ? getGameScoreBreakdown(sql, id, breakdownSeason) : Promise.resolve(undefined),
         !isGoalie && oniceSeason ? getPlayStyle(sql, id, oniceSeason) : Promise.resolve(undefined),
         isGoalie ? Promise.resolve(new Map<number, number>()) : getXgfBySeason(sql, id),
+        getPlayerValue(sql, id),
+        getAgingCurve(sql, grp),
       ]);
-    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf };
+    return { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve };
   });
   if (!data) notFound();
-  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf } = data;
+  const { player, isGoalie, skaterSeasons, goalieSeasons, lastGames, contract, ceiling, edge, sources, advanced, breakdown, style, xgf, value, curve } = data;
 
   return (
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-8">
-      <Header player={player} contract={sources.has("contracts_csv") ? contract : undefined} ceiling={ceiling} showContract={sources.has("contracts_csv")} />
+      <Header player={player} contract={sources.has("contracts_csv") ? contract : undefined} ceiling={ceiling} showContract={sources.has("contracts_csv")} value={value} />
 
       {isGoalie ? (
         <>
@@ -99,11 +106,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
             </div>
             <div className="min-w-0 space-y-6">
               <SentimentPanel />
-              <Panel title="Age curve">
-                <Unavailable>
-                  How players at his position age, and where his contract falls on that curve, arrives with the trade tools.
-                </Unavailable>
-              </Panel>
+              <AgeCurvePanel curve={curve} age={player.age} contract={contract} position={player.position} />
               {sources.has("nhl_edge") && <SkatingPanel edge={edge} />}
             </div>
           </div>
@@ -113,7 +116,7 @@ export default async function PlayerPage({ params }: PageProps<"/player/[id]">) 
   );
 }
 
-function Header({ player, contract, ceiling, showContract }: { player: Player; contract: Contract | undefined; ceiling: number | null; showContract: boolean }) {
+function Header({ player, contract, ceiling, showContract, value }: { player: Player; contract: Contract | undefined; ceiling: number | null; showContract: boolean; value: PlayerValue | undefined }) {
   const isGoalie = player.position === "G";
   const eyebrow = [
     player.team_name ?? "Not on an NHL roster",
@@ -147,12 +150,12 @@ function Header({ player, contract, ceiling, showContract }: { player: Player; c
           <p className="text-sm text-muted">{bio.join(" · ")}</p>
         </div>
       </div>
-      {showContract && <ContractBoxes contract={contract} ceiling={ceiling} />}
+      {showContract && <ContractBoxes contract={contract} ceiling={ceiling} value={value} />}
     </section>
   );
 }
 
-function ContractBoxes({ contract, ceiling }: { contract: Contract | undefined; ceiling: number | null }) {
+function ContractBoxes({ contract, ceiling, value }: { contract: Contract | undefined; ceiling: number | null; value: PlayerValue | undefined }) {
   if (!contract) return <p className="text-sm text-muted">No contract on file.</p>;
   const years = Math.floor(contract.end_season / 10000) - Math.floor(currentSeason() / 10000) + 1;
   // The cap hit charged to his team, after any share his previous team retained.
@@ -167,7 +170,12 @@ function ContractBoxes({ contract, ceiling }: { contract: Contract | undefined; 
       <Box label="Cap hit" value={money(charged)} detail={capDetail} />
       <Box label="Term" value={`${years} yr${years === 1 ? "" : "s"}`} detail={`Through ${seasonLabel(contract.end_season)}${contract.expiry_status ? `, then ${contract.expiry_status}` : ""}`} />
       <Box label="Clause" value={clause} detail={contract.no_trade_list_size ? `${contract.no_trade_list_size}-team no-trade list` : undefined} />
-      <Box label="Surplus value" value="—" detail="arrives with the trade tools" highlight />
+      <Box
+        label="Surplus value"
+        value={value?.surplus == null ? "—" : `${value.surplus >= 0 ? "+" : "−"}${money(Math.abs(value.surplus))}`}
+        detail={value?.market == null ? "needs 40 recent games" : `vs. ${money(value.market)} market estimate`}
+        highlight
+      />
     </div>
     <p className="mt-2 text-right text-xs text-muted">
       {contract.source_status === "confirmed" ? (
@@ -542,6 +550,47 @@ function GoalieSeasons({ seasons }: { seasons: GoalieSeason[] }) {
           </tbody>
         </DataTable>
       )}
+    </Panel>
+  );
+}
+
+const GROUP_LABEL: Record<string, string> = { D: "defensemen", G: "goalies" };
+
+function AgeCurvePanel({ curve, age, contract, position }: { curve: AgePoint[]; age: number | null; contract: Contract | undefined; position: string | null }) {
+  if (curve.length === 0 || age == null) {
+    return <Panel title="Age curve"><Unavailable>Age curve not available.</Unavailable></Panel>;
+  }
+  const group = GROUP_LABEL[position ?? ""] ?? "forwards";
+  const endAge = contract ? age + Math.floor(contract.end_season / 10000) - Math.floor(currentSeason() / 10000) : null;
+  const peak = curve.reduce((a, b) => (b.index > a.index ? b : a));
+  const shown = curve.filter((p) => p.age >= 20 && p.age <= 37);
+  const here = curve.find((p) => p.age === age);
+  const atEnd = endAge != null ? curve.find((p) => p.age === endAge) : undefined;
+  return (
+    <Panel title="Age curve" note={`NHL ${group} · production index`}>
+      <div className="flex h-24 items-end gap-1" aria-label={`Production index by age for ${group}`}>
+        {shown.map((p) => (
+          <div
+            key={p.age}
+            title={`Age ${p.age}: ${Math.round(p.index)}`}
+            className={`flex-1 rounded-sm ${p.age === age ? "bg-positive" : endAge != null && p.age > age && p.age <= endAge ? "bg-positive/40" : "bg-border"}`}
+            style={{ height: `${Math.max(p.index, 5)}%` }}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex justify-between font-mono text-xs text-muted">
+        <span>{shown[0]?.age}</span><span>{shown[Math.floor(shown.length / 2)]?.age}</span><span>{shown[shown.length - 1]?.age}</span>
+      </div>
+      <p className="mt-3 text-sm">
+        At {age}, {group} typically produce {here ? Math.round(here.index) : "—"}% of their peak (age {peak.age}).
+        {atEnd && endAge != null && endAge > age
+          ? ` His contract runs through age ${endAge}, when the typical level is ${Math.round(atEnd.index)}%.`
+          : ""}
+      </p>
+      <p className="mt-2 text-xs text-muted">
+        From 24 seasons of NHL results, adjusted for league scoring and save percentage in each era. Shaded bars are
+        the seasons left on his contract.
+      </p>
     </Panel>
   );
 }
