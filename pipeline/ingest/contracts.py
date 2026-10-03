@@ -347,6 +347,59 @@ def set_extension_starts(conn) -> int:
     ).rowcount
 
 
+ADJUSTMENT_KINDS = {"bonus overage": "bonus_overage", "bonus_overage": "bonus_overage", "buyout": "buyout",
+                    "dead cap": "dead_cap", "dead_cap": "dead_cap"}
+
+
+def read_adjustments(path: Path) -> tuple[list[tuple], list[str]]:
+    """Optional "Adjustments" tab: team, kind (bonus overage, buyout, dead cap), player (optional), amount,
+    season (optional, defaults to the current season). Returns rows and problems."""
+    if path.suffix.lower() != ".xlsx":
+        return [], []
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    named = [name for name in wb.sheetnames if name.strip().lower() == "adjustments"]
+    if not named:
+        return [], []
+    rows, problems = [], []
+    it = wb[named[0]].iter_rows(values_only=True)
+    header = [str(h or "").strip().lower() for h in next(it, [])]
+    for line, values in enumerate(it, start=2):
+        rec = dict(zip(header, values))
+        if not any(v not in (None, "") for v in values):
+            continue
+        team = _text(rec.get("team")).upper()
+        kind = ADJUSTMENT_KINDS.get(_text(rec.get("kind")).lower())
+        try:
+            amount = parse_money(rec.get("amount"))
+        except ValueError:
+            amount = None
+        season = parse_season(rec.get("season")) if rec.get("season") not in (None, "") else None
+        if not team or not kind or amount is None:
+            problems.append(f"Adjustments row {line}: needs team, kind (bonus overage, buyout, dead cap), and amount")
+            continue
+        rows.append((team, kind, _text(rec.get("player")) or None, amount, season))
+    return rows, problems
+
+
+def load_adjustments(conn, rows: list[tuple], teams: dict[str, int], season: int) -> int:
+    """Replaces the file's adjustments (news-found ones stay unless the file lists the same item)."""
+    conn.execute("delete from team_cap_adjustments where event_id is null and source_urls is null")
+    n = 0
+    for team, kind, player, amount, row_season in rows:
+        if team not in teams:
+            continue
+        conn.execute(
+            """insert into team_cap_adjustments (team_id, season_id, kind, player_name, amount)
+               values (%s, %s, %s, %s, %s)
+               on conflict (team_id, season_id, kind, coalesce(player_name, '')) do update set amount = excluded.amount""",
+            (teams[team], row_season or season, kind, player, amount),
+        )
+        n += 1
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Load the starting contracts data")
     parser.add_argument("path", nargs="?", type=Path, default=XLSX_PATH if XLSX_PATH.exists() else CSV_PATH)
@@ -433,11 +486,17 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                 )
         counts["extension_starts_set"] = set_extension_starts(conn)
+        adjustments, adjustment_problems = read_adjustments(args.path)
+        from pipeline.ingest.nightly import current_season
+        counts["adjustments_loaded"] = load_adjustments(conn, adjustments, teams, current_season())
+        result.problems.extend((0, "Adjustments", p) for p in adjustment_problems)
         counts["rows_loaded"] = len(good)
         counts["rows_with_problems"] = len({line for line, _, _ in result.problems})
         counts["unmatched_players"] = len(unmatched)
 
     print(f"Loaded {len(good)} contracts from {args.path.name}.")
+    if counts.get("adjustments_loaded"):
+        print(f"Loaded {counts['adjustments_loaded']} cap adjustments (bonus overages, buyouts, dead cap).")
     if result.problems:
         print(f"\n{len(result.problems)} problems (row numbers match the spreadsheet):")
         # One line for the many rows that only lack a start season (stored as unknown).

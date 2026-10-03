@@ -90,3 +90,22 @@ def test_normalize_ignores_accents_punctuation_and_hyphens():
     assert normalize("Arvid Söderblom") == "arvid soderblom"
     assert normalize("J.T Compher") == normalize("J.T. Compher") == "jt compher"
     assert normalize("Mats Zuccarello-Aasen") == "mats zuccarello aasen"
+
+
+def test_read_adjustments_tab(tmp_path):
+    from openpyxl import Workbook
+
+    from pipeline.ingest.contracts import read_adjustments
+
+    wb = Workbook()
+    wb.active.title = "Contracts"
+    ws = wb.create_sheet("Adjustments")
+    ws.append(["team", "kind", "player", "amount", "season"])
+    ws.append(["BOS", "Bonus overage", None, "$46,407", None])
+    ws.append(["SJS", "buyout", "Some Player", 1500000, "2026-27"])
+    ws.append(["TOR", "mystery", None, 100, None])
+    path = tmp_path / "contracts.xlsx"
+    wb.save(path)
+    rows, problems = read_adjustments(path)
+    assert rows == [("BOS", "bonus_overage", None, 46407, None), ("SJS", "buyout", "Some Player", 1500000, 20262027)]
+    assert len(problems) == 1 and "row 4" in problems[0]
