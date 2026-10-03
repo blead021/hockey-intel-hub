@@ -12,6 +12,7 @@ them). Nothing here changes a contract: a mismatch is reported, not fixed.
 
 import argparse
 import json
+import os
 import re
 import time
 from collections import defaultdict
@@ -26,12 +27,70 @@ from pipeline.jobs import job_run
 from pipeline.sentiment.rss import GOOGLE_NEWS_URL
 
 PAUSE_SECONDS = 1.5
-PER_CONTRACT = 4          # signing headlines kept per contract, newest first
+PER_CONTRACT = 4          # signing headlines kept per contract
+# Reading "$X over Y years" from a headline is simple, so a small model does it (about a fifth of the cost).
+MODEL = os.environ.get("SOURCING_MODEL", "claude-haiku-4-5")
 # Signing headlines nearly always state money or length; others are skipped before paying for Claude.
 SIGNING = re.compile(r"\$|million|\bm\b|year|entry-level|\belc\b|extension|re-sign|signs|signed|agree", re.IGNORECASE)
 MONEY = re.compile(r"\$\s?\d|million", re.IGNORECASE)
 TERM = re.compile(r"\b(one|two|three|four|five|six|seven|eight|\d)[- ]year", re.IGNORECASE)
 TOLERANCE = 0.01          # announced figures are often rounded ("$5.4 million"), so within 1% counts as a match
+
+
+def search_signing_window(conn, http, counts) -> None:
+    """Older contracts: a general search mostly returns recent stories, so for contracts with no announcement
+    found and a known start season, search the year before that season began, when the deal was signed."""
+    rows = conn.execute(
+        """select c.id, coalesce(p.first_name || ' ' || p.last_name, c.player_name), c.start_season
+           from contract_sources s join contracts c on c.id = s.contract_id left join players p on p.id = c.player_id
+           where s.status = 'not_found' and c.start_season is not null and coalesce(s.note, '') not like '%%window%%'"""
+    ).fetchall()
+    for contract_id, name, start in rows:
+        first_year = start // 10000
+        query = (f'"{name}" (signs OR signed OR extension OR "agree to terms" OR "entry-level" OR contract) '
+                 f"after:{first_year - 1}-05-01 before:{first_year}-11-01")
+        response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
+        archive.save("contract_sources", f"{contract_id}-window", {"query": query, "xml": response.text})
+        items = _keep(parse_results(response.content, f"source {contract_id}"), name)
+        _store(conn, contract_id, items, retry=True)
+        counts["window_searched"] += 1
+        counts["window_with_headlines"] += bool(items)
+        time.sleep(PAUSE_SECONDS)
+
+
+def _keep(results, name: str) -> list:
+    items = [
+        i for i in results
+        if mentions_player(i.title, name) and SIGNING.search(i.title)
+        and not BLOCKED_OUTLETS.search(i.outlet or "") and not BLOCKED_OUTLETS.search(i.url or "")
+    ]
+    # Headlines stating money or length first (they describe the deal), then the newest.
+    items.sort(key=lambda i: (bool(MONEY.search(i.title)), bool(TERM.search(i.title)),
+                              i.published_at or datetime.min.replace(tzinfo=UTC)), reverse=True)
+    return items[:PER_CONTRACT]
+
+
+def _store(conn, contract_id: int, items: list, retry: bool = False) -> None:
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.executemany(
+                """insert into contract_news (id, title, outlet, url, published_at, query, status, processed_at, error)
+                   values (%s, %s, %s, %s, %s, %s, 'skipped', now(), 'contract sourcing')
+                   on conflict (id) do nothing""",
+                [(i.id, i.title, i.outlet, i.url, i.published_at, i.query) for i in items],
+            )
+        found = json.dumps({"news_ids": [i.id for i in items]}) if items else None
+        if retry:
+            conn.execute(
+                """update contract_sources set status = %s, found = coalesce(%s::jsonb, found),
+                       note = 'searched the signing window', searched_at = now() where contract_id = %s""",
+                ("searching" if items else "not_found", found, contract_id),
+            )
+        else:
+            conn.execute(
+                "insert into contract_sources (contract_id, status, found, searched_at) values (%s, %s, %s, now())",
+                (contract_id, "searching" if items else "not_found", found),
+            )
 
 
 def contracts_to_search(conn) -> list[tuple]:
@@ -49,29 +108,8 @@ def search(conn, http, counts) -> None:
         query = f'"{name}" (signs OR signed OR "agree to terms" OR extension OR "entry-level" OR contract)'
         response = request(http, "GET", GOOGLE_NEWS_URL, params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"})
         archive.save("contract_sources", str(contract_id), {"query": query, "xml": response.text})
-        items = [
-            i for i in parse_results(response.content, f"source {contract_id}")
-            if mentions_player(i.title, name) and SIGNING.search(i.title)
-            and not BLOCKED_OUTLETS.search(i.outlet or "") and not BLOCKED_OUTLETS.search(i.url or "")
-        ]
-        # Headlines stating money or length first (they describe the deal), then the newest.
-        items.sort(key=lambda i: (bool(MONEY.search(i.title)), bool(TERM.search(i.title)),
-                                  i.published_at or datetime.min.replace(tzinfo=UTC)), reverse=True)
-        items = items[:PER_CONTRACT]
-        with conn.transaction():
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """insert into contract_news (id, title, outlet, url, published_at, query, status, processed_at, error)
-                       values (%s, %s, %s, %s, %s, %s, 'skipped', now(), 'contract sourcing')
-                       on conflict (id) do nothing""",
-                    [(i.id, i.title, i.outlet, i.url, i.published_at, i.query) for i in items],
-                )
-            conn.execute(
-                """insert into contract_sources (contract_id, status, found, searched_at)
-                   values (%s, %s, %s, now())""",
-                (contract_id, "searching" if items else "not_found",
-                 None if not items else json.dumps({"news_ids": [i.id for i in items]})),
-            )
+        items = _keep(parse_results(response.content, f"source {contract_id}"), name)
+        _store(conn, contract_id, items)
         counts["contracts_searched"] += 1
         counts["with_headlines"] += bool(items)
         time.sleep(PAUSE_SECONDS)
@@ -135,7 +173,7 @@ def verify(conn, counts) -> None:
         chunks.append(current)
 
     for chunk in chunks:
-        result = extract(claude, [item for _, item in chunk], team_codes)
+        result = extract(claude, [item for _, item in chunk], team_codes, model=MODEL)
         counts["input_tokens"] += result.input_tokens
         counts["output_tokens"] += result.output_tokens
         per_contract: dict[int, list[dict]] = defaultdict(list)
@@ -183,12 +221,17 @@ def main(argv: list[str] | None = None) -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--search", action="store_true")
     mode.add_argument("--verify", action="store_true")
+    mode.add_argument("--window", action="store_true", help="second search for older contracts (free)")
     mode.add_argument("--report", action="store_true")
     args = parser.parse_args(argv)
     if args.search:
         with job_run("contract_sourcing_search") as counts, connect(autocommit=True) as conn, client() as http:
             search(conn, http, counts)
             print(f"sourcing search ok: {dict(counts)}")
+    elif args.window:
+        with job_run("contract_sourcing_window") as counts, connect(autocommit=True) as conn, client() as http:
+            search_signing_window(conn, http, counts)
+            print(f"sourcing window search ok: {dict(counts)}")
     elif args.verify:
         with job_run("contract_sourcing_verify") as counts, connect(autocommit=True) as conn:
             verify(conn, counts)

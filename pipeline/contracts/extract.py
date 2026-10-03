@@ -107,18 +107,25 @@ def format_items(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def extract(client: anthropic.Anthropic, items: list[dict], team_codes: dict[str, str]) -> Extraction:
-    """One request for up to BATCH_SIZE items. Item numbers in the result are 1-based positions in items."""
-    response = client.beta.messages.create(
-        model=MODEL,
+def extract(client: anthropic.Anthropic, items: list[dict], team_codes: dict[str, str],
+            model: str = MODEL) -> Extraction:
+    """One request for up to BATCH_SIZE items. Item numbers in the result are 1-based positions in items.
+
+    The daily job uses the default model. Simpler, high-volume reads (contract sourcing) may pass a small
+    model; small models take no effort setting and no fallback."""
+    small = model.startswith("claude-haiku")
+    params = dict(
+        model=model,
         max_tokens=16000,
         system=system_prompt(team_codes),
         messages=[{"role": "user", "content": "News items:\n" + format_items(items)}],
-        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
-        # If a safety classifier declines, the request is retried on a fallback model in the same call.
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
+        output_config={"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}}
+        if small else {"effort": EFFORT, "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
     )
+    if not small:
+        # If a safety classifier declines, the request is retried on a fallback model in the same call.
+        params.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+    response = client.beta.messages.create(**params)
     usage = response.usage
     if response.stop_reason == "refusal":
         return Extraction([], response.model, usage.input_tokens, usage.output_tokens, "refusal")
