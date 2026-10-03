@@ -327,6 +327,8 @@ export async function getSkaterLastGames(sql: Sql, playerId: number, limit = 5) 
 }
 
 export type Contract = {
+  source_status: string | null;
+  source_url: string | null;
   cap_hit: number;
   aav: number | null;
   start_season: number;
@@ -339,10 +341,11 @@ export type Contract = {
 
 export async function getCurrentContract(sql: Sql, playerId: number, season: number): Promise<Contract | undefined> {
   const [row] = await sql<Contract[]>`
-    select cap_hit::float8 as cap_hit, aav::float8 as aav, start_season, end_season, expiry_status, clause,
-           no_trade_list_size, retained_pct::float8 as retained_pct
-    from contracts where player_id = ${playerId} and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
-    order by start_season desc limit 1`;
+    select c.cap_hit::float8 as cap_hit, c.aav::float8 as aav, c.start_season, c.end_season, c.expiry_status, c.clause,
+           c.no_trade_list_size, c.retained_pct::float8 as retained_pct,
+           s.status as source_status, s.source_urls[1] as source_url
+    from contracts c left join contract_sources s on s.contract_id = c.id where c.player_id = ${playerId} and c.status = 'active' and ${season} between coalesce(c.start_season, 0) and c.end_season
+    order by c.start_season desc nulls last limit 1`;
   return row;
 }
 

@@ -162,11 +162,28 @@ function ContractBoxes({ contract, ceiling }: { contract: Contract | undefined; 
     : ceiling ? `${((charged / ceiling) * 100).toFixed(1)}% of ${money(ceiling)} cap` : undefined;
   const clause = contract.clause && contract.clause !== "none" ? contract.clause : "None";
   return (
+    <div>
     <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border sm:grid-cols-4">
       <Box label="Cap hit" value={money(charged)} detail={capDetail} />
       <Box label="Term" value={`${years} yr${years === 1 ? "" : "s"}`} detail={`Through ${seasonLabel(contract.end_season)}${contract.expiry_status ? `, then ${contract.expiry_status}` : ""}`} />
       <Box label="Clause" value={clause} detail={contract.no_trade_list_size ? `${contract.no_trade_list_size}-team no-trade list` : undefined} />
       <Box label="Surplus value" value="—" detail="arrives with the trade tools" highlight />
+    </div>
+    <p className="mt-2 text-right text-xs text-muted">
+      {contract.source_status === "confirmed" ? (
+        <>
+          Confirmed by the public signing announcement
+          {contract.source_url && (
+            <>
+              {" · "}
+              <a href={contract.source_url} target="_blank" rel="noopener noreferrer" className="underline">source</a>
+            </>
+          )}
+        </>
+      ) : (
+        "Contract details from our records; public announcement not yet matched"
+      )}
+    </p>
     </div>
   );
 }
