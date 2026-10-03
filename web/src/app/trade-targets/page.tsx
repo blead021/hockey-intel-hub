@@ -274,7 +274,7 @@ export default async function TradeTargetsPage({ searchParams }: PageProps<"/tra
         )}
         <p className="mt-3 text-xs text-muted">
           Team status comes from our power rating (points percentage, goal differential, and 5v5 expected goals share,
-          leaning on last season until a team has played enough games): top 10 Contender, bottom 10 Seller. A
+          leaning on last season until a team has played enough games): top 10 Contender, bottom 10 Seller once teams have played 20 games (Bubble before that). A
           contender&apos;s six best players by projected WAR are marked Core and shown faded, since contenders rarely move
           them. Cap fit is the share of salary the selling team would need to retain (50% maximum). Fills is his
           percentile at his position in the team&apos;s weakest category he helps. WAR is PuckSleuth&apos;s projection per 82
