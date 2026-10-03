@@ -74,6 +74,7 @@ export type RosterSkater = {
   fow: number;
   fol: number;
   xgf_pct: number | null;
+  war: number | null;
   cap_hit: number | null;
   end_season: number | null;
   expiry_status: string | null;
@@ -104,7 +105,7 @@ export async function getRosterSkaters(sql: Sql, teamId: number, season: number,
            coalesce(s.gp, 0) as gp, coalesce(s.g, 0) as g, coalesce(s.a, 0) as a, coalesce(s.pts, 0) as pts,
            coalesce(s.plus_minus, 0) as plus_minus, coalesce(s.pim, 0) as pim, coalesce(s.sog, 0) as sog,
            coalesce(s.toi_sec, 0) as toi_sec, s.pp_toi_sec, coalesce(s.fow, 0) as fow, coalesce(s.fol, 0) as fol,
-           oi.xgf_pct,
+           oi.xgf_pct, (select war::float8 from player_war w where w.player_id = p.id and w.season_id = ${season}) as war,
            c.cap_hit, c.end_season, c.expiry_status, c.clause
     from members m
     join players p on p.id = m.player_id
@@ -134,6 +135,7 @@ export type RosterGoalie = {
   ga: number;
   toi_sec: number;
   gsax: number | null;
+  war: number | null;
   cap_hit: number | null;
   end_season: number | null;
   expiry_status: string | null;
@@ -164,7 +166,7 @@ export async function getRosterGoalies(sql: Sql, teamId: number, season: number,
            coalesce(s.gp, 0) as gp, coalesce(s.gs, 0) as gs, coalesce(s.w, 0) as w, coalesce(s.l, 0) as l,
            coalesce(s.otl, 0) as otl, coalesce(s.shots_against, 0) as shots_against,
            coalesce(s.saves, 0) as saves, coalesce(s.ga, 0) as ga, coalesce(s.toi_sec, 0) as toi_sec,
-           gx.gsax,
+           gx.gsax, (select war::float8 from player_war w where w.player_id = p.id and w.season_id = ${season}) as war,
            c.cap_hit, c.end_season, c.expiry_status, c.clause
     from members m
     join players p on p.id = m.player_id

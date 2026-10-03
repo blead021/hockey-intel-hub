@@ -193,7 +193,7 @@ export default async function TeamPage({ params, searchParams }: PageProps<"/tea
           </table>
         )}
         <p className="mt-3 text-xs text-muted">
-          FO% shown for centers. 5v5 xGF% from our expected goals model. WAR arrives with the trade tools.
+          FO% shown for centers. 5v5 xGF% from our expected goals model. WAR is PuckSleuth&apos;s estimate: wins above a replacement-level player, from our Game Score.
           Fans = fan sentiment 0-100 with 14-day trend. Chatter = trade mentions in the last 7 days.
         </p>
       </div>
@@ -272,7 +272,7 @@ function SkaterRow({ p, s, season, showContracts }: { p: RosterSkater; s: Player
       <td className={`px-2 py-2 text-right font-mono ${p.xgf_pct == null ? "" : p.xgf_pct >= 0.5 ? "text-positive" : "text-negative"}`}>
         {p.xgf_pct == null ? "—" : (p.xgf_pct * 100).toFixed(1)}
       </td>
-      <td className="px-2 py-2 text-right font-mono">—</td>
+      <td className={`px-2 py-2 text-right font-mono ${p.war == null ? "" : p.war >= 0 ? "" : "text-negative"}`}>{p.war == null ? "—" : p.war.toFixed(1)}</td>
       {showContracts && <ContractCells p={p} season={season} />}
       <FansCell s={s} />
       <ChatterCell s={s} />
@@ -293,7 +293,7 @@ function GoalieRow({ g, s, season, showContracts }: { g: RosterGoalie; s: Player
       <td className={`px-2 py-2 text-right font-mono ${g.gsax == null ? "" : g.gsax >= 0 ? "text-positive" : "text-negative"}`}>
         {g.gsax == null ? "—" : signed(Math.round(g.gsax * 10) / 10)}
       </td>
-      <td className="px-2 py-2 text-right font-mono">—</td>
+      <td className={`px-2 py-2 text-right font-mono ${g.war == null ? "" : g.war >= 0 ? "" : "text-negative"}`}>{g.war == null ? "—" : g.war.toFixed(1)}</td>
       {showContracts && <ContractCells p={g} season={season} />}
       <FansCell s={s} />
       <ChatterCell s={s} />
