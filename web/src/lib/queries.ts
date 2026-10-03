@@ -887,3 +887,109 @@ export async function getAgingCurve(sql: Sql, grp: "F" | "D" | "G"): Promise<Age
   return sql<AgePoint[]>`
     select age, index::float8 as index from aging_curves where grp = ${grp} and age between 19 and 38 order by age`;
 }
+
+export type TradeTarget = {
+  player_id: number; name: string; team: string; position: string; age: number | null;
+  cap_hit: number; years: number; end_season: number; expiry_status: string | null; clause: string | null;
+  war_proj: number | null; surplus: number | null; perf_pctile: number | null; fans_pctile: number | null; perf_vs_fans: number | null;
+  fans: number | null; fans_trend: number | null; beat: number | null; beat_trend: number | null;
+  chatter: number; chatter_prior: number;
+  need: Record<string, number | null>;
+};
+
+export type TargetFilters = {
+  exceptTeamId?: number; group?: "F" | "D" | "G" | "FD"; minAge?: number; maxAge?: number; maxCap?: number;
+  minYears?: number; maxYears?: number; noNmc?: boolean; search?: string;
+};
+
+// Trade Targets (CLAUDE.md section 7): every player under contract on another team, with projected WAR,
+// surplus value, a performance percentile within his position group, sentiment, and trade chatter.
+export async function getTradeTargets(sql: Sql, season: number, f: TargetFilters): Promise<TradeTarget[]> {
+  const group = f.group ?? null;
+  const search = f.search ? `%${f.search.toLowerCase()}%` : null;
+  return sql<TradeTarget[]>`
+    with latest as (select max(date) as d from sentiment_daily),
+    val as (
+      select distinct on (player_id) player_id, war_proj::float8 as war_proj, surplus::float8 as surplus
+      from player_value order by player_id, as_of desc),
+    pct as (
+      select v.player_id, percent_rank() over (
+               partition by case when p.position = 'D' then 'D' when p.position = 'G' then 'G' else 'F' end
+               order by v.war_proj) * 100 as perf_pctile
+      from val v join players p on p.id = v.player_id where v.war_proj is not null),
+    aud as (
+      select s.player_id,
+             max(s.score_0_100::float8) filter (where s.audience = 'fan') as fans,
+             max(s.score_0_100::float8) filter (where s.audience = 'beat_writer') as beat
+      from sentiment_daily s, latest where s.date = latest.d group by s.player_id),
+    -- Buy-low compares ranks within the same group (players with a fan score, same position group), because fan
+    -- scores cluster near the middle and the players fans talk about skew toward good ones.
+    fan_rank as (
+      select a.player_id,
+             percent_rank() over (partition by g.grp order by a.fans) * 100 as fans_pctile,
+             percent_rank() over (partition by g.grp order by v.war_proj) * 100 as perf_vs_fans
+      from aud a join val v on v.player_id = a.player_id
+      join (select id, case when position = 'D' then 'D' when position = 'G' then 'G' else 'F' end as grp from players) g
+        on g.id = a.player_id
+      where a.fans is not null and v.war_proj is not null),
+    old as (
+      select s.player_id,
+             max(s.score_0_100::float8) filter (where s.audience = 'fan') as fans,
+             max(s.score_0_100::float8) filter (where s.audience = 'beat_writer') as beat
+      from sentiment_daily s, latest where s.date = latest.d - 14 group by s.player_id),
+    chat as (
+      select player_id,
+             sum(trade_mentions) filter (where date > (select d from latest) - 7)::int as chatter,
+             sum(trade_mentions) filter (where date <= (select d from latest) - 7 and date > (select d from latest) - 14)::int as prior
+      from sentiment_daily where audience <> 'all' and date > (select d from latest) - 14 group by player_id)
+    select p.id as player_id, p.first_name || ' ' || p.last_name as name, t.abbrev as team, p.position,
+           date_part('year', age(p.birth_date))::int as age,
+           c.cap_hit::float8 as cap_hit, (c.end_season / 10000 - ${season} / 10000 + 1)::int as years,
+           c.end_season, c.expiry_status, c.clause,
+           v.war_proj, v.surplus, pct.perf_pctile::float8 as perf_pctile, fr.fans_pctile::float8 as fans_pctile, fr.perf_vs_fans::float8 as perf_vs_fans,
+           a.fans, a.fans - o.fans as fans_trend, a.beat, a.beat - o.beat as beat_trend,
+           coalesce(ch.chatter, 0) as chatter, coalesce(ch.prior, 0) as chatter_prior,
+           json_build_object('goal_scoring', n.goal_scoring, 'playmaking', n.playmaking, 'physicality', n.physicality,
+             'defense_5v5', n.defense_5v5, 'power_play', n.power_play, 'penalty_kill', n.penalty_kill,
+             'goaltending', n.goaltending) as need
+    from players p
+    left join player_need_pctiles n on n.player_id = p.id
+    join teams t on t.id = p.current_team_id
+    join lateral (
+      select cap_hit, end_season, expiry_status, clause from contracts
+      where player_id = p.id and status = 'active' and ${season} between coalesce(start_season, 0) and end_season
+        and cap_hit is not null
+      order by end_season limit 1) c on true
+    left join val v on v.player_id = p.id
+    left join pct on pct.player_id = p.id
+    left join aud a on a.player_id = p.id
+    left join fan_rank fr on fr.player_id = p.id
+    left join old o on o.player_id = p.id
+    left join chat ch on ch.player_id = p.id
+    where (${f.exceptTeamId ?? null}::int is null or p.current_team_id <> ${f.exceptTeamId ?? null})
+      and (${group}::text is null
+           or (${group} = 'FD' and p.position <> 'G')
+           or (${group} = 'D' and p.position = 'D') or (${group} = 'G' and p.position = 'G')
+           or (${group} = 'F' and p.position in ('C', 'L', 'R')))
+      and (${f.minAge ?? null}::int is null or date_part('year', age(p.birth_date)) >= ${f.minAge ?? null})
+      and (${f.maxAge ?? null}::int is null or date_part('year', age(p.birth_date)) <= ${f.maxAge ?? null})
+      and (${f.maxCap ?? null}::float8 is null or c.cap_hit <= ${f.maxCap ?? null})
+      and (${f.minYears ?? null}::int is null or c.end_season / 10000 - ${season} / 10000 + 1 >= ${f.minYears ?? null})
+      and (${f.maxYears ?? null}::int is null or c.end_season / 10000 - ${season} / 10000 + 1 <= ${f.maxYears ?? null})
+      and (not ${f.noNmc ?? false} or coalesce(c.clause, '') <> 'NMC')
+      and (${search}::text is null or lower(p.first_name || ' ' || p.last_name || ' ' || t.abbrev || ' ' || t.name) like ${search})
+    order by coalesce(ch.chatter, 0) desc, v.war_proj desc nulls last
+    limit 300`;
+}
+
+// A team's cap space this season and its Need/Thin categories, for cap fit and the "Roster need" card.
+export type TeamNeed = { category: string; grade: number };
+
+export async function getTeamBuyingPower(sql: Sql, teamId: number, season: number): Promise<{ space: number | null; needs: TeamNeed[] }> {
+  const [row] = await sql<{ space: number | null; needs: TeamNeed[] | null }[]>`
+    select (select cap_ceiling from cap_limits where season_id = ${season})
+             - coalesce((select sum(charge) from team_cap_charges where team_id = ${teamId}), 0) as space,
+           (select json_agg(json_build_object('category', category, 'grade', grade) order by grade, z) from team_grades
+             where team_id = ${teamId} and as_of = (select max(as_of) from team_grades) and grade < 0) as needs`;
+  return { space: row?.space == null ? null : Number(row.space), needs: row?.needs ?? [] };
+}
