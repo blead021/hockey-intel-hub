@@ -19,7 +19,10 @@ export function SiteNav() {
   return (
     <header className="bg-ink text-surface">
       <div className="mx-auto flex max-w-7xl items-center gap-6 overflow-x-auto px-4 py-3">
-        <Link href="/" className="shrink-0 font-heading text-2xl font-bold uppercase tracking-wide">
+        <Link href="/" className="flex shrink-0 items-center gap-3 font-heading text-2xl font-bold uppercase tracking-wide">
+          {/* The hockey detective. Plain img: Cloudflare image resizing is off to avoid its fees. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" width={40} height={40} className="h-10 w-10 rounded-md bg-[#ebe8e1] object-cover" />
           {SITE_NAME}
         </Link>
         <nav className="flex shrink-0 gap-1 text-sm">
